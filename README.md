@@ -25,6 +25,11 @@ wildcard/exclusion set algebra for ListUsers).
   equivalent HTTP API calls and `fga` CLI session, plus a `store.fga.yaml` test file.
 - **Assertions** and nine example stores (Drive, GitHub, Slack, expenses, entitlements,
   conditions, custom roles, org/team roles, recursive groups).
+- **Share links with no backend** – *Share* copies a link such as
+  `https://fga.memoised.dev/#s=1.pZVNb9sw…` that carries the whole store (model, tuples,
+  assertions, suggested queries, the current query and graph view) deflate-compressed in the URL
+  fragment. Fragments are never sent to a server; the recipient's browser rebuilds the store
+  locally and keeps it like any other. A typical store is a 1–3 KB link.
 
 ## Layout
 
@@ -33,6 +38,7 @@ src/engine.js      pure engine: DSL parser, model JSON, tuples, store, resolvers
 src/examples.js    example stores
 src/app.js         application layer (editors, query lab, inspector, wiring)
 src/app-graph.js   graph module (inlined into app.js at build time)
+src/app-share.js   share links: store ⇄ compressed URL fragment (inlined after the app)
 src/page.html      markup
 src/styles.css     styles
 build.js           bundler: artifact page, local test page, and the hosted site

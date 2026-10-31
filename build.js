@@ -7,7 +7,7 @@ let html = src('page.html');
 html = html.replace('/*__STYLES__*/', () => src('styles.css'));
 html = html.replace('/*__ENGINE__*/', () => safe(src('engine.js')));
 html = html.replace('/*__EXAMPLES__*/', () => safe(src('examples.js')));
-html = html.replace('/*__APP__*/', () => safe(src('app.js').replace('/*__GRAPH__*/', () => src('app-graph.js'))));
+html = html.replace('/*__APP__*/', () => safe(src('app.js').replace('/*__GRAPH__*/', () => src('app-graph.js')).replace('/*__SHARE__*/', () => src('app-share.js'))));
 fs.writeFileSync(path.join(__dirname, 'openfga-playground.html'), html);
 console.log('built openfga-playground.html', (html.length / 1024).toFixed(1), 'KB');
 
@@ -78,7 +78,8 @@ ${body}</body>
         'app-graph.js': await js(strict(src('app-graph.js'))),
         'app-2.js': await js(strict(chunks[1].replace('/*__GRAPH__*/', ''))),
         'app-3.js': await js(strict(chunks[2])),
-        'app-4.js': await js(strict(chunks[3])),
+        'app-4.js': await js(strict(chunks[3].replace('/*__SHARE__*/', ''))),
+        'app-5.js': await js(strict(src('app-share.js'))),
         'styles.css': csso.minify(src('styles.css')).css.replace(/\}(?=[^\s}])/g, '}\n').replace(/[^\x00-\x7f]/gu, (c) => '\\' + c.codePointAt(0).toString(16) + ' ') + '\n'
       };
       const named = {};
@@ -88,7 +89,7 @@ ${body}</body>
         named[k] = name;
         fs.writeFileSync(path.join(out, name), v);
       }
-      const appOrder = ['app-1.js', 'app-graph.js', 'app-2.js', 'app-3.js', 'app-4.js'].map((k) => '/' + named[k]);
+      const appOrder = ['app-1.js', 'app-graph.js', 'app-2.js', 'app-3.js', 'app-4.js', 'app-5.js'].map((k) => '/' + named[k]);
       const bootScript = `<script>
 (function () {
   var app = ${JSON.stringify(appOrder)};

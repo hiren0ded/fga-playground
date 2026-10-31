@@ -886,6 +886,10 @@ user:* viewer document:readme
     S.activeStoreId = id;
     const st = activeStore();
     S.lastGoodModel = null; S.result = null; S.summaryHl = null;
+    // Make the new store's model current before the query fields are rendered, so a saved
+    // ListObjects/ListUsers type survives the switch (its <select> is filled from the model).
+    const pre = FGA.parseDSL(st.draftDsl);
+    if (!pre.errors.length && pre.model.types.length) { S.model = pre.model; S.lastGoodModel = pre.model; S.effectiveModel = pre.model; }
     renderStoreSelect();
     dslEditor.value = st.draftDsl;
     tuplesEditor.value = st.tuplesText;
@@ -1356,4 +1360,5 @@ user:* viewer document:readme
   }
   boot();
   window.__fga = { Graph };
+/*__SHARE__*/
 })();
