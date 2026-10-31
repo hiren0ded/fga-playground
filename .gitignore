@@ -1,0 +1,6 @@
+node_modules/
+dist/
+local-test.html
+openfga-playground.html
+.vercel/
+.DS_Store

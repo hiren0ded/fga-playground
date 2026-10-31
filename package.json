@@ -1,0 +1,21 @@
+{
+  "name": "openfga-playground",
+  "version": "1.0.0",
+  "description": "OpenFGA Visual Playground: write an authorization model, add tuples, and watch Check / ListObjects / ListUsers / Expand resolve step by step on a live graph.",
+  "scripts": {
+    "build": "node build.js --site",
+    "build:artifact": "node build.js",
+    "build:local": "node build.js --local --site",
+    "test": "node test/engine.test.js"
+  },
+  "author": "Hiren",
+  "license": "MIT",
+  "devDependencies": {
+    "csso": "^5.0.5",
+    "csso-cli": "^4.0.2",
+    "terser": "^5.51.2",
+    "d3": "^7.9.0",
+    "dagre": "^0.8.5"
+  },
+  "private": true
+}

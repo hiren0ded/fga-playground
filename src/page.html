@@ -1,0 +1,295 @@
+<title>OpenFGA Visual Playground</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/*__STYLES__*/
+</style>
+
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8ea2ff"/><stop offset="1" stop-color="#38c7b5"/></linearGradient></defs>
+        <circle cx="7" cy="16" r="3.2" fill="url(#bm)"/><circle cx="25" cy="7" r="3.2" fill="url(#bm)"/><circle cx="25" cy="25" r="3.2" fill="url(#bm)"/><circle cx="16" cy="16" r="2.4" fill="url(#bm)"/>
+        <path d="M9.8 14.6 L13.8 15.4 M18.2 15.2 L22.4 8.6 M18.2 16.8 L22.4 23.4" stroke="url(#bm)" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+      </svg>
+      <div>
+        <div class="brand-name">OpenFGA Visual Playground</div>
+        <div class="brand-sub">Write a model, add tuples, watch the resolver work.</div>
+      </div>
+    </div>
+    <div class="top-center">
+      <div class="store-pick">
+        <label for="store-select">Store</label>
+        <select class="ctl" id="store-select" aria-label="Store"></select>
+        <button class="btn sm" id="btn-new-store" title="Create a store">+ New</button>
+        <span class="store-new" id="store-new">
+          <input class="ctl" id="store-new-name" placeholder="Store name" maxlength="48">
+          <button class="btn sm primary" id="store-new-ok">Create</button>
+          <button class="btn sm ghost" id="store-new-cancel">Cancel</button>
+        </span>
+      </div>
+      <span class="model-badge" id="model-badge"><span class="dot"></span><span id="model-badge-text">Model</span><code id="model-badge-id"></code></span>
+      <button class="btn sm primary" id="btn-write-model" title="Write the draft as a new immutable authorization model version">Write model</button>
+    </div>
+    <div class="top-right">
+      <button class="btn sm" id="btn-inspector" aria-pressed="true" title="Show or hide the store inspector">Store inspector</button>
+    </div>
+    <nav class="mobile-nav" aria-label="Panels">
+      <button data-view="editor" aria-pressed="true">Model</button>
+      <button data-view="graph">Graph</button>
+      <button data-view="query">Query</button>
+      <button data-view="store">Store</button>
+    </nav>
+  </header>
+
+  <main class="workspace">
+    <!-- ───────── editor pane ───────── -->
+    <section class="pane pane-editor" id="pane-editor" aria-label="Model and tuples">
+      <div class="pane-tabs" role="tablist">
+        <button role="tab" data-tab="dsl" aria-selected="true">Model</button>
+        <button role="tab" data-tab="tuples" aria-selected="false">Tuples <span class="count" id="tuple-count"></span></button>
+        <button role="tab" data-tab="assertions" aria-selected="false">Assertions <span class="count" id="assert-count"></span></button>
+        <button role="tab" data-tab="examples" aria-selected="false">Examples</button>
+        <button class="pane-collapse" id="collapse-editor" title="Hide this pane (keyboard: [)" aria-label="Hide the model pane">«</button>
+      </div>
+      <button class="rail" id="rail-editor" title="Show the model pane"><span>»</span><em>Model &amp; tuples</em></button>
+
+      <div class="tab-body" id="tab-dsl">
+        <div class="editor-toolbar">
+          <span class="meta" id="dsl-meta">schema 1.1</span>
+          <span style="display:flex;gap:6px">
+            <button class="btn sm ghost" id="btn-format-dsl" title="Re-indent the DSL">Format</button>
+            <button class="btn sm ghost" id="btn-copy-dsl">Copy</button>
+          </span>
+        </div>
+        <div class="editor" id="dsl-editor">
+          <div class="editor-inner">
+            <div class="editor-gutter" id="dsl-gutter"></div>
+            <div class="editor-area">
+              <pre class="editor-pre" id="dsl-pre" aria-hidden="true"></pre>
+              <textarea class="editor-ta" id="dsl-ta" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Authorization model DSL"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="diagnostics" id="dsl-diags"></div>
+      </div>
+
+      <div class="tab-body" id="tab-tuples" hidden>
+        <div class="quick-add">
+          <input class="ctl" id="qa-user" placeholder="user:anne" list="dl-users" aria-label="User">
+          <input class="ctl" id="qa-rel" placeholder="relation" list="dl-relations" aria-label="Relation">
+          <input class="ctl" id="qa-obj" placeholder="doc:roadmap" list="dl-objects" aria-label="Object">
+          <button class="btn sm primary" id="qa-add" title="Write this tuple">Write</button>
+        </div>
+        <div class="editor" id="tuples-editor">
+          <div class="editor-inner">
+            <div class="editor-gutter" id="tuples-gutter"></div>
+            <div class="editor-area">
+              <pre class="editor-pre" id="tuples-pre" aria-hidden="true"></pre>
+              <textarea class="editor-ta" id="tuples-ta" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Relationship tuples, one per line: user relation object"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="diagnostics" id="tuples-diags"></div>
+        <div class="editor-status" id="tuples-status"></div>
+      </div>
+
+      <div class="tab-body" id="tab-assertions" hidden>
+        <div class="assert-add">
+          <input class="ctl" id="as-user" placeholder="user:anne" list="dl-users" aria-label="User">
+          <input class="ctl" id="as-rel" placeholder="relation" list="dl-relations" aria-label="Relation">
+          <input class="ctl" id="as-obj" placeholder="doc:roadmap" list="dl-objects" aria-label="Object">
+          <span class="row2"><select class="ctl" id="as-exp" aria-label="Expectation"><option value="true">expect ✓ allowed</option><option value="false">expect ✗ denied</option></select>
+          <button class="btn sm primary" id="as-add">Add assertion</button></span>
+        </div>
+        <div class="assert-list" id="assert-list"></div>
+        <div class="assert-summary" id="assert-summary"></div>
+      </div>
+
+      <div class="tab-body" id="tab-examples" hidden>
+        <div class="examples" id="examples">
+          <div class="examples-intro">Each example creates its own store with a written model version, tuples and assertions. Your current stores stay as they are.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── graph pane ───────── -->
+    <section class="pane pane-graph" id="pane-graph" aria-label="Graph">
+      <div class="graph-toolbar">
+        <div class="seg" id="graph-mode">
+          <button data-mode="schema" aria-pressed="true">Schema</button>
+          <button data-mode="model" aria-pressed="false">Resolver</button>
+          <button data-mode="data" aria-pressed="false">Data</button>
+        </div>
+        <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" title="Draw an edge from each subject type (e.g. user) to every relation it can be assigned to, instead of a badge" hidden>subjects</button>
+        <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>
+        <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
+        <span class="hint" id="graph-hint"></span>
+        <div class="find" id="find-wrap">
+          <input class="ctl" id="graph-find" placeholder="Find…  ⌘K" aria-label="Find a node, relation or type" autocomplete="off" spellcheck="false">
+          <div class="find-list" id="find-list" hidden></div>
+        </div>
+        <div class="graph-ctl">
+          <button class="btn sm icon" id="zoom-out" title="Zoom out">−</button>
+          <button class="btn sm" id="zoom-fit" title="Fit to view">Fit</button>
+          <button class="btn sm icon" id="zoom-in" title="Zoom in">+</button>
+          <button class="btn sm icon" id="btn-focus" title="Full view: hide the side panes (keyboard: f, Esc to exit)" aria-pressed="false" aria-label="Full view">⤢</button>
+          <div class="menu-wrap">
+            <button class="btn sm icon" id="btn-gmenu" title="Layout, export and more" aria-haspopup="true" aria-expanded="false">⋯</button>
+            <div class="menu" id="gmenu" hidden>
+              <div class="menu-title">Layout</div>
+              <div class="seg xs" id="layout-seg">
+                <button data-l="auto" aria-pressed="true" title="Left-to-right or top-to-bottom, whichever fits">Auto</button>
+                <button data-l="LR" aria-pressed="false">→</button>
+                <button data-l="TB" aria-pressed="false">↓</button>
+                <button data-l="lanes" aria-pressed="false" title="Data view: one column per type">Lanes</button>
+                <button data-l="force" aria-pressed="false" title="Data view: force-directed">Force</button>
+                <button data-l="radial" aria-pressed="false" title="Rings around the focused node">Radial</button>
+              </div>
+              <button class="menu-item" id="gm-reset" title="Forget dragged positions in this view">Reset moved nodes</button>
+              <button class="menu-item" id="gm-minimap">Toggle minimap</button>
+              <div class="menu-title">Export</div>
+              <button class="menu-item" id="gm-svg">Copy as SVG</button>
+              <button class="menu-item" id="gm-png">Copy as PNG</button>
+              <div class="menu-title">Keyboard</div>
+              <div class="menu-keys"><span><kbd>⌘K</kbd> find</span><span><kbd>f</kbd> full view</span><span><kbd>[</kbd><kbd>]</kbd> panes</span><span><kbd>Esc</kbd> clear</span><span>click focus · double-click query · right-click menu</span><span>drag move · Alt-drag write tuple · Shift-click add to selection</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="resizer" id="rz-left" title="Drag to resize"></div>
+      <div class="resizer right" id="rz-right" title="Drag to resize"></div>
+      <div class="graph-stage" id="graph-stage">
+        <div class="focus-bar" id="focus-bar" hidden></div>
+        <div class="node-menu" id="node-menu" hidden></div>
+        <div class="node-menu ctx-menu" id="ctx-menu" hidden></div>
+        <svg class="minimap" id="minimap" hidden aria-hidden="true"></svg>
+        <div class="tt-banner" id="tt-banner" hidden></div>
+        <svg id="graph-svg" role="img" aria-label="Authorization graph"></svg>
+        <div class="graph-tip" id="graph-tip" hidden></div>
+        <div class="graph-empty" id="graph-empty" hidden></div>
+      </div>
+      <div class="graph-status">
+        <span id="graph-status"></span>
+        <div class="legend" id="legend-schema">
+          <span><i></i>can be assigned (relations listed)</span><span><i class="ttu"></i>inherited via a tupleset</span><span><b>∨ ∧ ¬</b> or · and · but not</span><span id="legend-diff" hidden><b class="dadd">+ added</b> <b class="dchg">~ changed</b> <b class="drem">− removed</b></span>
+        </div>
+        <div class="legend" id="legend-model" hidden>
+          <span><i></i>direct</span><span><i class="computed"></i>computed</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>∧</b> and</span><span><i class="ex"></i><b>¬</b> but not</span>
+        </div>
+        <div class="legend" id="legend-data" hidden>
+          <span class="rel-chips" id="rel-chips" hidden></span><span><b>#rel</b> userset</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── query pane ───────── -->
+    <section class="pane pane-query" id="pane-query" aria-label="Query lab">
+      <div class="pane-head"><button class="pane-collapse" id="collapse-query" title="Hide this pane (keyboard: ])" aria-label="Hide the query pane">»</button><h2>Query lab</h2><span class="hint"><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs</span></div>
+      <button class="rail" id="rail-query" title="Show the query lab"><span>«</span><em>Query lab</em></button>
+      <div class="q-body" id="q-body">
+        <form class="q-form" id="q-form" autocomplete="off">
+          <div class="seg accent" id="q-type">
+            <button type="button" data-q="check" aria-pressed="true">Check</button>
+            <button type="button" data-q="listObjects" aria-pressed="false">ListObjects</button>
+            <button type="button" data-q="listUsers" aria-pressed="false">ListUsers</button>
+            <button type="button" data-q="expand" aria-pressed="false">Expand</button>
+          </div>
+          <div class="sentence" id="q-fields"></div>
+          <div class="q-actions">
+            <button type="submit" class="btn primary sm" id="q-run">Run</button>
+            <button type="button" class="btn sm toggle" id="q-live" aria-pressed="true" title="Re-run this query whenever the model, tuples or fields change">live</button>
+            <button type="button" class="btn sm ghost" id="q-adv-toggle" aria-expanded="false" title="Request context for conditions, and contextual tuples">context <span id="q-adv-badge" class="count"></span></button>
+          </div>
+          <div class="adv-body" id="q-adv" hidden>
+            <div class="field">
+              <label for="q-context">Context (JSON, read by conditions)</label>
+              <textarea class="ctl" id="q-context" placeholder='{"current_time": "2026-10-31T10:00:00Z"}'></textarea>
+            </div>
+            <div class="field">
+              <label for="q-ctx-tuples">Contextual tuples (one per line, used only for this query)</label>
+              <textarea class="ctl" id="q-ctx-tuples" placeholder="user:zoe viewer doc:roadmap"></textarea>
+              <span class="sub" id="q-ctx-tuples-status"></span>
+            </div>
+          </div>
+        </form>
+        <div class="try" id="try-chips" hidden></div>
+        <div class="result" id="result"></div>
+        <details class="explain" id="explain">
+          <summary><span>Resolution trace</span><span class="hint" id="explain-hint"></span></summary>
+          <div class="explain-body" id="explain-body">
+            <div class="stepper" id="stepper" hidden>
+              <div class="step-ctl">
+                <button class="btn sm icon" id="st-first" title="First step">⏮</button>
+                <button class="btn sm icon" id="st-prev" title="Previous step (←)">◀</button>
+                <button class="btn sm" id="st-play" title="Play (space)">▶ Play</button>
+                <button class="btn sm icon" id="st-next" title="Next step (→)">▶</button>
+                <button class="btn sm icon" id="st-last" title="Last step">⏭</button>
+                <span class="speed" title="Playback speed"><select id="st-speed" aria-label="Playback speed"><option value="1400">slow</option><option value="700" selected>normal</option><option value="300">fast</option></select></span>
+                <span class="pos" id="st-pos"></span>
+              </div>
+              <div class="step-bar"><i id="st-bar"></i></div>
+              <div class="step-now" id="st-now"></div>
+            </div>
+            <div class="trace" id="trace"></div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- ───────── store inspector ───────── -->
+  <section class="inspector" id="inspector" aria-label="Store inspector">
+    <div class="insp-resize" id="insp-resize" title="Drag to resize"></div>
+    <div class="insp-head">
+      <span class="title"><span>Store</span><code id="insp-store-id"></code></span>
+      <div class="pane-tabs" role="tablist" id="insp-tabs">
+        <button role="tab" data-itab="tuples" aria-selected="true">Tuples</button>
+        <button role="tab" data-itab="models" aria-selected="false">Models</button>
+        <button role="tab" data-itab="types" aria-selected="false">Types</button>
+        <button role="tab" data-itab="json" aria-selected="false">Model JSON</button>
+        <button role="tab" data-itab="changes" aria-selected="false">Changes</button>
+        <button role="tab" data-itab="api" aria-selected="false">API</button>
+        <button role="tab" data-itab="cli" aria-selected="false">CLI</button>
+      </div>
+      <div class="insp-meta" id="insp-meta"></div>
+      <button class="btn sm ghost" id="insp-toggle" title="Collapse">▾</button>
+    </div>
+    <div class="insp-body" id="insp-body"></div>
+  </section>
+</div>
+
+<datalist id="dl-users"></datalist>
+<datalist id="dl-relations"></datalist>
+<datalist id="dl-objects"></datalist>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<script>
+/*__ENGINE__*/
+</script>
+<script>
+/*__EXAMPLES__*/
+</script>
+<script>
+function startOpenFGAPlayground() {
+/*__APP__*/
+}
+(function bootLibs() {
+  var need = [
+    { ok: function () { return typeof d3 !== 'undefined'; }, src: 'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js' },
+    { ok: function () { return typeof dagre !== 'undefined'; }, src: 'https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js' }
+  ].filter(function (l) { return !l.ok(); });
+  if (!need.length) { startOpenFGAPlayground(); return; }
+  var left = need.length, failed = false;
+  var done = function () {
+    if (--left) return;
+    if (!failed && typeof d3 !== 'undefined' && typeof dagre !== 'undefined') { startOpenFGAPlayground(); return; }
+    var stage = document.getElementById('graph-empty');
+    if (stage) { stage.hidden = false; stage.textContent = 'The graph libraries (d3, dagre) could not be loaded from the CDN. Check your network and reload the page.'; }
+  };
+  need.forEach(function (l) { var sc = document.createElement('script'); sc.src = l.src; sc.onload = done; sc.onerror = function () { failed = true; done(); }; document.head.appendChild(sc); });
+})();
+</script>
