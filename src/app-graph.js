@@ -186,6 +186,8 @@
     // proof walk: a numbered path (FGA.proofSteps) drawn over the data graph. `proofWalk` is pinned by a
     // click / a Check result; `proofPreview` follows the pointer over a derived edge.
     let proofWalk = null, proofPreview = null, proofObjects = new Set();
+    let proofOrder = 'check'; // 'check' = numbered as Check resolves (object → subject); 'flow' = subject → goal
+    let proofLock = false;    // locked: clicks on the graph cannot change the selection or clear the walk
     let typeIndex = new Map(), relIndex = new Map();
     let curVG = null, curL = null, bounds = null, lastStage = { w: 0, h: 0 }, insetBottom = 0;
     let currentHl = null, lastOpts = {}, hoverHl = null, focus = null;
@@ -705,7 +707,7 @@
         drawEdgeLabel(sel.select('g.lbl'), e, dur);
       });
       eg.on('dblclick', (ev, e) => { if (e.access) { ev.stopPropagation(); hideTip(); emit('runCheck', { user: e.user, relation: e.relation, object: e.object }); } })
-        .on('click', (ev, e) => { if (!e.access) return; ev.stopPropagation(); hideTip(); const steps = stepsFor(e); if (steps) showProof(steps, { pin: true, title: `${e.user} ${e.relation} ${e.object}` }); })
+        .on('click', (ev, e) => { if (!e.access || locked()) return; ev.stopPropagation(); hideTip(); const pr = proofFor(e); if (pr) showProof(pr, { pin: true, lock: true, title: `${e.user} ${e.relation} ${e.object}` }); })
         .on('mouseenter', function (ev, e) {
           d3.select(this).classed('hover', true).raise();
           showTip(ev, tipForEdge(e));
@@ -713,7 +715,7 @@
           if (!focus && !proofWalk) { hoverHl = edgeHl(e); applyVisual(); }
         })
         .on('mousemove', moveTip).on('mouseleave', function () { d3.select(this).classed('hover', false); hideTip(); if (hoverHl || proofPreview) { hoverHl = null; proofPreview = null; applyVisual(); } })
-        .on('contextmenu', (ev, e) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'edge', datum: e, mode }, ev); });
+        .on('contextmenu', (ev, e) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); if (locked()) return; emit('context', { kind: 'edge', datum: e, mode }, ev); });
       // nodes / cards
       const ng = gNodes.selectAll('g.node').data(L.nodes, (n) => n.id).join(
         (enter) => enter.append('g'), (update) => update, (exit) => exit.remove(),
@@ -730,12 +732,12 @@
       const own = (n) => isCard || n.kind === 'inst'; // cards wire their own header / row handlers
       ng.on('mouseenter', (ev, n) => { if (own(n)) return; showTip(ev, tipForNode(n)); previewFocus(n.id); emit('nodeHover', mode === 'model' ? (n.key || n.subj || null) : n.id); }).on('mousemove', moveTip)
         .on('mouseleave', (ev, n) => { if (own(n)) return; hideTip(); previewFocus(null); emit('nodeHover', null); })
-        .on('click', (ev, n) => { if (own(n) || ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); setFocus(n.id, n, ev); })
-        .on('dblclick', (ev, n) => { if (own(n)) return; hideTip(); ev.stopPropagation(); const d = menuDatum(n); if (d) emit('nodeClick', d, mode, ev); })
-        .on('contextmenu', (ev, n) => { if (own(n)) return; ev.preventDefault(); ev.stopPropagation(); hideTip(); const d = menuDatum(n); if (d) emit('context', { kind: 'node', datum: d, mode }, ev); });
+        .on('click', (ev, n) => { if (own(n) || ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); if (locked()) return; setFocus(n.id, n, ev); })
+        .on('dblclick', (ev, n) => { if (own(n)) return; hideTip(); ev.stopPropagation(); if (locked()) return; const d = menuDatum(n); if (d) emit('nodeClick', d, mode, ev); })
+        .on('contextmenu', (ev, n) => { if (own(n)) return; ev.preventDefault(); ev.stopPropagation(); hideTip(); if (locked()) return; const d = menuDatum(n); if (d) emit('context', { kind: 'node', datum: d, mode }, ev); });
       ng.call(dragBehaviour());
       svg.on('click', () => emit('blankClick'));
-      svg.on('contextmenu', (ev) => { ev.preventDefault(); emit('context', { kind: 'blank', mode }, ev); });
+      svg.on('contextmenu', (ev) => { ev.preventDefault(); if (locked()) return; emit('context', { kind: 'blank', mode }, ev); });
     }
     function drawEdgeLabel(g, e, dur) {
       g.selectAll('*').remove();
@@ -783,7 +785,7 @@
         const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 20},${n.height / 2 - 6})`).style('cursor', 'pointer');
         tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
         tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('+');
-        tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); toggleCard(n.id, true); })
+        tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; toggleCard(n.id, true); })
           .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">open ${esc(n.id)} as a card: one slot per relation, tuples pointing at the slot they grant</div>`); });
       }
       if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
@@ -798,22 +800,22 @@
       const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 18},8)`).style('cursor', 'pointer');
       tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
       tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('–');
-      tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); toggleCard(n.id, false); })
+      tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; toggleCard(n.id, false); })
         .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">collapse ${esc(n.id)} back to a plain node</div>`); });
       if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
       sel.append('rect').attr('class', 'hdr-hit').attr('width', n.width - 30).attr('height', HDR).attr('fill', 'transparent')
         .on('mouseenter', (ev) => { showTip(ev, tipForNode(plain)); previewFocus(n.id); emit('nodeHover', n.id); }).on('mousemove', moveTip).on('mouseleave', () => { hideTip(); previewFocus(null); emit('nodeHover', null); })
-        .on('click', (ev) => { if (ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); setFocus(n.id, plain, ev); })
-        .on('dblclick', (ev) => { hideTip(); ev.stopPropagation(); emit('nodeClick', plain, 'data', ev); })
-        .on('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'node', datum: plain, mode }, ev); });
+        .on('click', (ev) => { if (ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); if (locked()) return; setFocus(n.id, plain, ev); })
+        .on('dblclick', (ev) => { hideTip(); ev.stopPropagation(); if (locked()) return; emit('nodeClick', plain, 'data', ev); })
+        .on('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); if (locked()) return; emit('context', { kind: 'node', datum: plain, mode }, ev); });
       const rows = sel.selectAll('g.row').data(n.rows).enter().append('g').attr('class', (r) => `row${r.direct || r.derived ? '' : ' empty'}`).attr('data-id', (r) => r.id)
         .attr('transform', (r, i) => `translate(0,${HDR + 8 + i * ROW + 13})`);
       rows.append('rect').attr('class', 'row-bg').attr('x', 5).attr('y', -13.5).attr('width', n.width - 10).attr('height', 18).attr('rx', 4);
       rows.append('text').attr('class', 'rname').attr('x', 12).attr('y', 0).text((r) => r.rel);
       rows.append('text').attr('class', 'rdef').attr('x', 12 + n.nameColW).attr('y', 0).text((r) => r.defShort);
       rows.on('mouseenter', (ev, r) => { showTip(ev, tipForSlot(r)); emit('nodeHover', r.id); }).on('mousemove', moveTip).on('mouseleave', () => { hideTip(); emit('nodeHover', null); })
-        .on('click', (ev, r) => { hideTip(); ev.stopPropagation(); emit('nodeClick', r, 'data', ev); })
-        .on('contextmenu', (ev, r) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'slot', datum: r, mode }, ev); });
+        .on('click', (ev, r) => { hideTip(); ev.stopPropagation(); if (locked()) return; emit('nodeClick', r, 'data', ev); })
+        .on('contextmenu', (ev, r) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); if (locked()) return; emit('context', { kind: 'slot', datum: r, mode }, ev); });
       // computed relations: an arc from the implying row to the implied one, down the right margin
       const idx = new Map(n.rows.map((r, i) => [r.rel, i]));
       n.links.forEach((l, i) => {
@@ -862,7 +864,7 @@
     // ── drag: move nodes (pin them) or, in connect mode / with Alt, draw a new tuple
     function dragBehaviour() {
       let start = null, connecting = false, tempLine = null, incident = [], fromSlot = null;
-      return d3.drag().clickDistance(4)
+      return d3.drag().clickDistance(4).filter((ev) => !ev.ctrlKey && !ev.button && !locked())
         .on('start', function (ev, n) {
           connecting = connectMode || !!(ev.sourceEvent && ev.sourceEvent.altKey);
           if (connecting) { if (mode !== 'data') { connecting = false; return; } const rowEl = ev.sourceEvent && ev.sourceEvent.target.closest && ev.sourceEvent.target.closest('g.row'); fromSlot = rowEl ? rowEl.getAttribute('data-id') : null; tempLine = gTemp.append('path').attr('class', 'connect-line'); return; }
@@ -1284,22 +1286,25 @@
     // Steps come from FGA.proofSteps: one per tuple hop, implied relation or tuple-to-userset
     // derivation, numbered from the subject to the goal. The same numbers are drawn as badges on the
     // edges / card arcs they refer to and listed in the bar at the bottom of the stage.
-    function stepsFor(e) {
-      if (e.steps !== undefined) return e.steps;
-      e.steps = null;
+    function proofFor(e) {
+      if (e.proof !== undefined) return e.proof;
+      e.proof = null;
       if (!modelRef || !storeRef) return null;
       try {
         const res = FGA.check(modelRef, storeRef, { user: e.user, relation: e.relation, object: e.object, context: {} });
-        if (res.allowed && res.root) e.steps = FGA.proofSteps(res.root.proof);
+        if (res.allowed && res.root && res.root.proof) e.proof = res.root.proof;
         else e.proofError = res.error || 'not allowed any more — the store changed';
       } catch (err) { e.proofError = err.message; }
-      return e.steps;
+      return e.proof;
     }
+    function stepsFor(e) { const pr = proofFor(e); return pr ? FGA.proofSteps(pr, proofOrder) : null; }
+    const locked = () => proofLock && !!proofWalk;
     const stepShort = (st) => {
-      if (st.kind === 'tuple') return `${st.from} ─${st.relation}→ ${st.object}`;
-      if (st.kind === 'computed') return `${st.implied} ⇒ ${st.relation}`;
-      if (st.kind === 'ttu') return `${st.computed} from ${st.tupleset} ⇒ ${st.relation}`;
-      if (st.kind === 'and') return `∧ all hold → ${st.relation}`;
+      const down = proofOrder === 'check';
+      if (st.kind === 'tuple') return down ? `${st.object} ←${st.relation}─ ${st.from}` : `${st.from} ─${st.relation}→ ${st.object}`;
+      if (st.kind === 'computed') return down ? `${st.object}#${st.relation} ⇐ ${st.implied}` : `${st.implied} ⇒ ${st.object}#${st.relation}`;
+      if (st.kind === 'ttu') return down ? `${st.object}#${st.relation} ⇐ ${st.computed} from ${st.tupleset}` : `${st.computed} from ${st.tupleset} ⇒ ${st.object}#${st.relation}`;
+      if (st.kind === 'and') return down ? `${st.object}#${st.relation}: ∧ all branches` : `∧ all hold → ${st.object}#${st.relation}`;
       return st.text;
     };
     function stepsHtml(steps) {
@@ -1316,13 +1321,16 @@
       });
       return hl;
     }
-    function showProof(steps, opts = {}) {
-      if (!steps || !steps.length) { clearProof(); return; }
+    function showProof(proof, opts = {}) {
+      const steps = proof ? FGA.proofSteps(proof, proofOrder) : [];
+      if (!steps.length) { clearProof({ force: true }); return; }
       const objs = new Set();
       steps.forEach((st) => { if (st.object) objs.add(st.object); if (st.fromObject) objs.add(st.fromObject); [st.from, st.to].forEach((k) => { if (k && k.includes('#')) objs.add(k.split('#')[0]); }); });
       const canOpen = (o) => { const t = modelRef && modelRef.typeMap.get(o.split(':')[0]); return !!(t && t.relations.length); };
       const isCardNow = (o) => !!(curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
-      proofWalk = { steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto };
+      proofWalk = { proof, steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto };
+      proofLock = !!opts.lock;
+      svg.node().classList.toggle('locked', proofLock);
       proofPreview = null;
       proofObjects = objs;
       // open the cards the walk needs (slots and arcs only exist on cards)
@@ -1330,7 +1338,9 @@
       else { renderProofBar(); applyVisual(); }
       if (!opts.auto && mode === 'data') setTimeout(() => fitToHighlighted(true), 30);
     }
-    function clearProof() {
+    function clearProof(opts = {}) {
+      if (locked() && !opts.force) return;
+      proofLock = false; svg.node().classList.remove('locked');
       if (!proofWalk && !proofPreview && !proofObjects.size) return;
       const wouldStay = (o) => (cardOverride.has(o) ? cardOverride.get(o) : cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(o));
       const closes = mode === 'data' && Array.from(proofObjects).some((o) => !wouldStay(o) && curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
@@ -1343,14 +1353,22 @@
       const walk = mode === 'data' ? proofWalk : null;
       pbar.hidden = !walk;
       if (!walk) return;
-      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="pb-hint">${walk.steps.length} step${walk.steps.length === 1 ? '' : 's'} · hover a step to flash it, click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
+      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
       $$('.pb-step', pbar).forEach((b) => {
         const st = walk.steps[+b.dataset.i];
         b.addEventListener('mouseenter', () => flashStep(st));
         b.addEventListener('click', () => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); });
       });
+      $$('.pb-order button', pbar).forEach((b) => b.addEventListener('click', () => setProofOrder(b.dataset.o)));
+      $('#pb-lock').addEventListener('click', () => { proofLock = !proofLock; svg.node().classList.toggle('locked', proofLock); renderProofBar(); });
       const back = $('#pb-back'); if (back) back.addEventListener('click', () => emit('proofBack', walk.back));
-      $('#pb-close').addEventListener('click', () => clearProof());
+      $('#pb-close').addEventListener('click', () => clearProof({ force: true }));
+    }
+    function setProofOrder(o) {
+      if (o !== 'check' && o !== 'flow') return;
+      proofOrder = o;
+      emit('proofOrder', o);
+      if (proofWalk) { proofWalk.steps = FGA.proofSteps(proofWalk.proof, proofOrder); renderProofBar(); placeBadges(); }
     }
     function flashStep(st) {
       const ids = [];
@@ -1539,7 +1557,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, get proofActive() { return !!proofWalk; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

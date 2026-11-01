@@ -854,3 +854,9 @@ svg.proofing .card.inst.hl .row:not(.hl) text { opacity: 0.4; }
 .graph-tip ol.steps li b { flex: 0 0 auto; display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10px; }
 .legend .pb-k { display: inline-block; padding: 0 5px; border-radius: 999px; background: var(--ok); color: #fff; font-size: 10px; }
 .graph-stage.mx-mode .proof-bar { display: none; }
+
+/* ── proof walk: lock + order */
+svg#graph-svg.locked .node, svg#graph-svg.locked .edge, svg#graph-svg.locked .row { cursor: default; }
+svg#graph-svg.locked .card-toggle { opacity: 0.25 !important; cursor: default; }
+.proof-bar .pb-order button { font-family: var(--font-mono); }
+.proof-bar .pb-lock[aria-pressed="true"] { border-color: var(--ok); color: var(--fg); }

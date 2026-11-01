@@ -642,10 +642,10 @@ user:* viewer document:readme
       if (last) {
         Graph.highlight(r.type === 'check' && r.res.allowed && r.proofHl && !S.ui.allSteps ? r.proofHl : S.summaryHl, { stepping: false });
         // the proof as a numbered walk over the data graph
-        if (r.type === 'check' && r.res.allowed && r.res.root && r.res.root.proof) Graph.showProof(FGA.proofSteps(r.res.root.proof), { pin: true, auto: !S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || null });
-        else Graph.clearProof();
+        if (r.type === 'check' && r.res.allowed && r.res.root && r.res.root.proof) Graph.showProof(r.res.root.proof, { pin: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || null });
+        else Graph.clearProof({ force: true });
       } else {
-        Graph.clearProof();
+        Graph.clearProof({ force: true });
         const hl = { modelNodes: Object.assign({}, e.hl.modelNodes || {}), modelEdges: Object.assign({}, e.hl.modelEdges || {}), dataNodes: Object.assign({}, e.hl.dataNodes || {}), dataEdges: Object.assign({}, e.hl.dataEdges || {}), rewrites: e.hl.rewrites || null };
         if (e.frame.modelNode && !hl.modelNodes[e.frame.modelNode]) hl.modelNodes[e.frame.modelNode] = 'active';
         if (e.frame.object && !e.frame.object.endsWith(':?') && !hl.dataNodes[e.frame.object]) hl.dataNodes[e.frame.object] = 'active';
@@ -911,7 +911,7 @@ user:* viewer document:readme
     S.timeTravel = null;
     S.activeStoreId = id;
     const st = activeStore();
-    S.lastGoodModel = null; S.result = null; S.summaryHl = null; S.proofBack = null; Graph.clearProof();
+    S.lastGoodModel = null; S.result = null; S.summaryHl = null; S.proofBack = null; Graph.clearProof({ force: true });
     // Make the new store's model current before the query fields are rendered, so a saved
     // ListObjects/ListUsers type survives the switch (its <select> is filled from the model).
     const pre = FGA.parseDSL(st.draftDsl);
@@ -1087,7 +1087,7 @@ user:* viewer document:readme
       else if (stNow === 'public') why = `every ${esc(u.split(':')[0])} holds it through a public wildcard grant`;
       else if (stNow === 'excluded') why = 'removed by a "but not" exclusion';
       else if (stNow === 'derived') {
-        try { const res = FGA.check(m, st, { user: u, relation: rel, object: o, context: {} }); const steps = res.allowed && res.root ? FGA.proofSteps(res.root.proof) : []; why = steps.length ? `Check follows these steps:<ol class="steps">${steps.map((x) => `<li><b>${x.n}</b><span>${esc(x.text)}</span></li>`).join('')}</ol>` : (res.allowed ? 'allowed' : 'not allowed'); } catch (e) { why = esc(e.message); }
+        try { const res = FGA.check(m, st, { user: u, relation: rel, object: o, context: {} }); const steps = res.allowed && res.root ? FGA.proofSteps(res.root.proof, Graph.proofOrder) : []; why = steps.length ? `Check follows these steps:<ol class="steps">${steps.map((x) => `<li><b>${x.n}</b><span>${esc(x.text)}</span></li>`).join('')}</ol>` : (res.allowed ? 'allowed' : 'not allowed'); } catch (e) { why = esc(e.message); }
       } else why = 'no path grants it';
       const diff = stBefore !== undefined && stBefore !== null && td.dataset.b !== stNow && (td.classList.contains('added') || td.classList.contains('removed')) ? `<div class="sub">${td.classList.contains('added') ? 'gained' : 'lost'} compared with the selected model version (was: ${esc(stBefore || 'none')})</div>` : '';
       const has = ['direct', 'derived', 'public'].includes(stNow);
@@ -1426,6 +1426,7 @@ user:* viewer document:readme
   Graph.on('nodeClick', (n, mode, ev) => { CtxMenu.close(); NodeMenu.open(n, mode, ev); });
   Graph.on('blankClick', () => { NodeMenu.close(); CtxMenu.close(); if (!Graph.multiSelecting) Graph.clearFocus(); Graph.clearProof(); });
   Graph.on('proofBack', (where) => { if (where === 'matrix') setGraphMode('matrix'); });
+  Graph.on('proofOrder', (o) => { S.ui.proofOrder = o; persist(); });
 
   // ── layout: collapsible panes, resizable widths, focus mode
   function applyLayout() {
@@ -1541,7 +1542,7 @@ user:* viewer document:readme
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); Query.run({}); return; }
     if (typing && e.key === 'Escape' && !NodeMenu.isOpen && !S.ui.focus) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (mq.matches) { S.ui.mobileView = 'graph'; applyMobile(); } $('#graph-find').focus(); return; }
-    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.clearProof(); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
+    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.clearProof({ force: true }); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
     if (typing) return;
     if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setFocus(!S.ui.focus); return; }
     if (e.key === '[') { S.ui.editorOpen = !S.ui.editorOpen; applyLayout(); persist(); return; }
@@ -1571,6 +1572,7 @@ user:* viewer document:readme
     Graph.setSubjects(!!S.ui.subjectEdges); $('#btn-subjects').setAttribute('aria-pressed', String(!!S.ui.subjectEdges));
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
     if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
+    if (S.ui.proofOrder) Graph.setProofOrder(S.ui.proofOrder);
     setGraphMode(S.ui.graphMode || 'schema');
     toggleInspector(S.ui.inspOpen !== false);
     switchStore(S.activeStoreId);
