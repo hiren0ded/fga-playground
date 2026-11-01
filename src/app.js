@@ -282,8 +282,9 @@ user:* viewer document:readme
     const sel = $('#compare-select');
     const cur = S.ui.compareId || '';
     sel.innerHTML = `<option value="">no diff</option>` + st.models.slice().reverse().map((m, i) => `<option value="${esc(m.id)}"${m.id === cur ? ' selected' : ''}>v${st.models.length - i} · ${esc(shortId(m.id))}</option>`).join('');
-    $('#compare-wrap').hidden = Graph.mode !== 'schema' || !st.models.length;
+    $('#compare-wrap').hidden = !(Graph.mode === 'schema' || Graph.mode === 'matrix') || !st.models.length;
     $('#legend-diff').hidden = !cur;
+    const lmd = $('#legend-mx-diff'); if (lmd) lmd.hidden = !cur;
   }
   $('#compare-select').addEventListener('change', () => { S.ui.compareId = $('#compare-select').value || null; persist(); recompute(); });
   // resolution view: which relation's tree is shown (empty = follow the query)
@@ -979,20 +980,126 @@ user:* viewer document:readme
     }
     return out;
   }
-  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: tuples as edges into object#relation slots — objects the query walked open as cards' };
+  // ── access matrix: subjects × objects for one relation, direct vs derived, diffed against a written model
+  const Matrix = (() => {
+    const el = $('#matrix'), tip = $('#graph-tip'), stage = $('#graph-stage');
+    const sel = () => (S.ui.matrix = S.ui.matrix || { type: null, relation: null });
+    function subjectTypes(m) { const out = new Set(); m.types.forEach((t) => t.relations.forEach((r) => r.directTypes.forEach((e) => { if (!e.relation) out.add(e.type); }))); return Array.from(out); }
+    // one cell state per (subject, object): direct | derived | public | excluded | ''
+    function compute(m, st, type, relation) {
+      const objects = st.objectsOfType(type);
+      const uts = subjectTypes(m);
+      const direct = new Set(st.tuples.map((t) => `${t.user.raw}|${t.relation}|${t.object.raw}`));
+      const cells = new Map(), wild = new Map();
+      for (const obj of objects) for (const ut of uts) {
+        const res = FGA.listUsers(m, st, { object: obj, relation, userType: ut, context: {} });
+        if (res.error) continue;
+        res.users.forEach((u) => cells.set(`${u}|${obj}`, direct.has(`${u}|${relation}|${obj}`) ? 'direct' : 'derived'));
+        res.excluded.forEach((u) => { if (!cells.has(`${u}|${obj}`)) cells.set(`${u}|${obj}`, 'excluded'); });
+        if (res.wildcard) { wild.set(`${ut}|${obj}`, direct.has(`${ut}:*|${relation}|${obj}`) ? 'direct' : 'derived'); }
+      }
+      // rows: plain subjects of every subject type, plus a wildcard row per type that is public somewhere
+      const rows = [];
+      uts.forEach((ut) => {
+        const tdef = m.typeMap.get(ut);
+        const pure = !tdef || !tdef.relations.length; // a pure subject type (user) is always listed in full
+        st.usersOfType(ut).forEach((u) => { if (u.split(':')[0] !== ut) return; const any = objects.some((o) => cells.has(`${u}|${o}`) || wild.has(`${ut}|${o}`)); if (pure || any) rows.push({ id: u, type: ut }); });
+        if (objects.some((o) => wild.has(`${ut}|${o}`))) rows.push({ id: `${ut}:*`, type: ut, wildcard: true });
+      });
+      const state = (row, obj) => {
+        if (row.wildcard) return wild.get(`${row.type}|${obj}`) || '';
+        const c = cells.get(`${row.id}|${obj}`);
+        if (c) return c;
+        return wild.has(`${row.type}|${obj}`) ? 'public' : '';
+      };
+      return { objects, rows, state };
+    }
+    function render() {
+      const m = S.effectiveModel, st = S.store, store = activeStore();
+      if (!m || !st) { el.innerHTML = `<div class="mx-empty">Write a valid model and some tuples to see who can do what.</div>`; return; }
+      const types = m.types.filter((t) => t.relations.length);
+      if (!types.length) { el.innerHTML = `<div class="mx-empty">No relations in the model yet.</div>`; return; }
+      const cur = sel();
+      let t = types.find((x) => x.name === cur.type); if (!t) { const qt = (Query.q.object || '').split(':')[0]; t = types.find((x) => x.name === (Query.q.type === 'listObjects' ? Query.q.objectType : qt)) || types[0]; }
+      let r = t.relations.find((x) => x.name === cur.relation); if (!r) r = t.relations.find((x) => x.name === Query.q.relation) || t.relations[0];
+      cur.type = t.name; cur.relation = r.name;
+      const now = compute(m, st, t.name, r.name);
+      const base = compareBase(store);
+      const before = base && base.typeMap.get(t.name) && base.typeMap.get(t.name).relMap.has(r.name) ? compute(base, st, t.name, r.name) : null;
+      const has = (x) => x === 'direct' || x === 'derived' || x === 'public';
+      let nDirect = 0, nDerived = 0, nGained = 0, nLost = 0;
+      const head = `<div class="mx-head"><span class="lbl">object type</span><div class="seg xs" id="mx-types">${types.map((x) => `<button data-t="${esc(x.name)}" aria-pressed="${x.name === t.name}">${esc(x.name)}<span class="n">${st.objectsOfType(x.name).length}</span></button>`).join('')}</div><span class="lbl">relation</span><div class="seg xs" id="mx-rels">${t.relations.map((x) => `<button data-r="${esc(x.name)}" aria-pressed="${x.name === r.name}" style="--e:${Graph.relColor(x.name)}">${esc(x.name)}</button>`).join('')}</div><span class="mx-sum" id="mx-sum"></span></div>`;
+      if (!now.objects.length) { el.innerHTML = head + `<div class="mx-empty">No ${esc(t.name)} objects in the store yet — write a tuple whose object is a ${esc(t.name)}.</div>`; wire(); return; }
+      const q = Query.q;
+      const body = now.rows.map((row, i) => {
+        const sep = i > 0 && now.rows[i - 1].type !== row.type;
+        const cellsHtml = now.objects.map((obj) => {
+          const stNow = now.state(row, obj);
+          const stBefore = before ? before.state(row, obj) : null;
+          let diff = '';
+          if (before) { if (has(stNow) && !has(stBefore)) { diff = ' added'; nGained++; } else if (!has(stNow) && has(stBefore)) { diff = ' removed'; nLost++; } }
+          if (stNow === 'direct') nDirect++; else if (stNow === 'derived' || stNow === 'public') nDerived++;
+          const curCell = q.type === 'check' && q.user === row.id && q.relation === r.name && q.object === obj ? ' cur' : '';
+          const glyph = stNow === 'excluded' ? '✕' : stNow ? '<i></i>' : (stBefore && has(stBefore) ? '<i></i>' : '·');
+          return `<td class="c ${stNow || 'none'}${diff}${curCell}" data-u="${esc(row.id)}" data-o="${esc(obj)}" data-s="${stNow}" data-b="${stBefore || ''}" style="--e:${Graph.relColor(r.name)}">${glyph}</td>`;
+        }).join('');
+        return `<tr class="${sep ? 'sep' : ''}" data-u="${esc(row.id)}"><th>${esc(row.id)}<span class="t">${esc(row.type)}</span></th>${cellsHtml}</tr>`;
+      }).join('');
+      const thead = `<thead><tr><th class="corner"></th>${now.objects.map((o) => `<th class="obj" data-o="${esc(o)}"><div>${esc(o)}</div></th>`).join('')}</tr></thead>`;
+      el.innerHTML = head + `<table class="mx">${thead}<tbody>${body}</tbody></table>`;
+      $('#mx-sum').textContent = `${now.rows.length} subject${now.rows.length === 1 ? '' : 's'} × ${now.objects.length} object${now.objects.length === 1 ? '' : 's'} · ${nDirect} direct · ${nDerived} derived${before ? ` · vs compared model: ${nGained} gained, ${nLost} lost` : ''}`;
+      wire();
+    }
+    function wire() {
+      $$('#mx-types button', el).forEach((b) => b.addEventListener('click', () => { sel().type = b.dataset.t; sel().relation = null; persist(); render(); }));
+      $$('#mx-rels button', el).forEach((b) => b.addEventListener('click', () => { sel().relation = b.dataset.r; persist(); render(); }));
+      $$('td.c', el).forEach((td) => {
+        td.addEventListener('click', () => { Query.load(Object.assign({}, Query.q, { type: 'check', user: td.dataset.u, relation: sel().relation, object: td.dataset.o })); Query.run({}); $$('td.c.cur', el).forEach((x) => x.classList.remove('cur')); td.classList.add('cur'); if (mq.matches) { S.ui.mobileView = 'query'; applyMobile(); } });
+        td.addEventListener('mouseenter', (ev) => { showTip(ev, tipFor(td)); hot(td, true); });
+        td.addEventListener('mousemove', moveTip);
+        td.addEventListener('mouseleave', () => { tip.hidden = true; hot(td, false); });
+      });
+    }
+    function hot(td, on) { const o = td.dataset.o; const th = el.querySelector(`th.obj[data-o="${CSS.escape(o)}"]`); if (th) th.classList.toggle('hot', on); const rh = td.parentElement.querySelector('th'); if (rh) rh.classList.toggle('hot', on); }
+    function tipFor(td) {
+      const u = td.dataset.u, o = td.dataset.o, rel = sel().relation, stNow = td.dataset.s, stBefore = td.dataset.b;
+      const m = S.effectiveModel, st = S.store;
+      let why = '';
+      if (stNow === 'direct') why = 'a tuple says so';
+      else if (stNow === 'public') why = `every ${esc(u.split(':')[0])} holds it through a public wildcard grant`;
+      else if (stNow === 'excluded') why = 'removed by a "but not" exclusion';
+      else if (stNow === 'derived' || stNow === 'wild') {
+        try { const res = FGA.check(m, st, { user: u, relation: rel, object: o, context: {} }); const chains = res.root ? FGA.proofChains(res.root.proof) : []; why = chains.length ? `<code>${esc(chains.map((c) => FGA.chainText(c)).join('\n'))}</code>` : (res.allowed ? 'allowed' : 'not allowed'); } catch (e) { why = esc(e.message); }
+      } else why = 'no path grants it';
+      const diff = stBefore !== undefined && stBefore !== null && td.dataset.b !== stNow && (td.classList.contains('added') || td.classList.contains('removed')) ? `<div class="sub">${td.classList.contains('added') ? 'gained' : 'lost'} compared with the selected model version (was: ${esc(stBefore || 'none')})</div>` : '';
+      return `<code>${esc(u)} ${esc(rel)} ${esc(o)}</code><div class="sub">${stNow ? esc(stNow) + ' — ' : ''}${why}</div>${diff}<div class="sub">click to run this Check</div>`;
+    }
+    function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; moveTip(ev); }
+    function moveTip(ev) {
+      const r = stage.getBoundingClientRect();
+      let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
+      if (x + tip.offsetWidth > r.width - 8) x = Math.max(8, ev.clientX - r.left - tip.offsetWidth - 10);
+      if (y + tip.offsetHeight > r.height - 8) y = Math.max(8, ev.clientY - r.top - tip.offsetHeight - 10);
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
+    }
+    return { render };
+  })();
+  Graph.on('renderMatrix', () => Matrix.render());
+  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: tuples as edges into object#relation slots — objects the query walked open as cards', matrix: 'matrix: who holds which relation on which object — direct tuples, derived access, public grants and exclusions; click a cell to Check it' };
   function syncGraphToolbar() {
     const m = Graph.mode;
     $$('#graph-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
     $('#graph-hint').textContent = GRAPH_HINTS[m] || '';
     $('#btn-connect').hidden = m !== 'data';
-    const st = activeStore(); if (st) $('#compare-wrap').hidden = m !== 'schema' || !st.models.length;
+    const st = activeStore(); if (st) $('#compare-wrap').hidden = !(m === 'schema' || m === 'matrix') || !st.models.length;
     $('#res-wrap').hidden = m !== 'model' || !S.effectiveModel;
     if (m === 'model') renderResSelect();
     $('#cards-wrap').hidden = m !== 'data';
     $('#cards-select').value = Graph.cardsMode;
     $('#btn-derived').hidden = m !== 'data';
     $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
-    $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
+    $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = m === 'matrix' || ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
+    $('#find-wrap').hidden = m === 'matrix';
   }
   function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });

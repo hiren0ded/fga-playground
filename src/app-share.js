@@ -59,7 +59,7 @@
         S.stores.push(st);
       }
       if (p.q && typeof p.q === 'object') st.query = Object.assign({ type: 'check' }, p.q);
-      if (['schema', 'model', 'data'].includes(p.view)) setGraphMode(p.view);
+      if (['schema', 'model', 'data', 'matrix'].includes(p.view)) setGraphMode(p.view);
       switchStore(st.id);
       toast(`Opened shared store “${st.name}” — it is saved in this browser like any other store`);
       return true;

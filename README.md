@@ -16,9 +16,22 @@ wildcard/exclusion set algebra for ListUsers).
 - **Stores and model versions** – create stores, write immutable authorization-model versions,
   diff a draft against a written version, see the tuple change log and replay it.
 - **Model DSL editor** (schema 1.1) with diagnostics, formatting and model-to-graph sync.
-- **Three graph views** – schema (one card per type), resolver (every relation as a node) and
-  data (every tuple as an edge); focus mode, multi-select with paths between nodes, layouts
-  (dagre, lanes, force, radial), find, minimap, drag/pin, collapse, SVG/PNG export.
+- **Four views of the same store**
+  - *Schema* – one card per type with its relations, cross-type links as edges.
+  - *Resolution* – one relation drawn as the tree Check walks: any-of / all-of / but-not,
+    directly assigned subjects, computed relations and "X from Y" branches. It follows the
+    query's relation (or any relation you pin) and the trace lights up the branch being tried,
+    short-circuited, satisfied or rejected.
+  - *Data* – tuples as edges. Objects the query walked open as **cards with one slot per
+    relation** (`doc:roadmap#viewer` is a real node), tuples point at the slot they grant,
+    computed relations are arcs between rows, "viewer from parent" is a derived edge between
+    cards, and a **derived** toggle materialises every grant no tuple states, with the proof on
+    hover. Cards can be opened for every object or none.
+  - *Matrix* – subjects × objects for one relation: direct tuple, derived, public wildcard or
+    excluded, with a diff against any written model version (gained / lost). Click a cell to
+    run that Check.
+  - Everywhere: focus mode, multi-select with paths between nodes, layouts (dagre, lanes, force,
+    radial), find, minimap, drag/pin, SVG/PNG export.
 - **Query lab** – Check / ListObjects / ListUsers / Expand with a one-line proof for ALLOWED,
   a step-by-step resolution trace, contextual tuples and condition context.
 - **Store inspector** – tuples (Read filter), models, types, model JSON, changes, and the

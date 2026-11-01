@@ -625,7 +625,16 @@
       $('#legend-schema').hidden = mode !== 'schema';
       $('#legend-model').hidden = mode !== 'model';
       $('#legend-data').hidden = mode !== 'data';
+      const lm = $('#legend-matrix'); if (lm) lm.hidden = mode !== 'matrix';
       $('#btn-subjects').hidden = true;
+      stage.classList.toggle('mx-mode', mode === 'matrix');
+      if (mode === 'matrix') {
+        // the access matrix is an HTML table drawn by the app; the svg stays empty underneath
+        gClusters.selectAll('*').remove(); gEdges.selectAll('*').remove(); gNodes.selectAll('*').remove();
+        empty.hidden = true; bounds = null; curL = null; curVG = null; updateMinimap();
+        emit('renderMatrix');
+        return;
+      }
       const vg = viewGraph();
       curVG = vg;
       if (!vg) {
@@ -1315,6 +1324,7 @@
       if (!q) return [];
       const out = [];
       const add = (id, label, m, kind, datum) => out.push({ id, label, mode: m, kind, datum, score: label.toLowerCase().startsWith(q) ? 0 : label.toLowerCase().includes(q) ? 1 : 2 });
+      if (mode === 'matrix') return [];
       (graphs.data ? graphs.data.nodes : []).forEach((n) => { if (n.id.toLowerCase().includes(q)) add(n.id, n.id, 'data', n.kind === 'wildcard' ? 'wildcard' : 'object', n); });
       if (q.includes('#') && graphs.data && modelRef) graphs.data.nodes.forEach((n) => { const t = modelRef.typeMap.get(n.type); if (!t || n.kind !== 'object') return; t.relations.forEach((r) => { const id = `${n.id}#${r.name}`; if (id.toLowerCase().includes(q)) add(id, id, 'data', 'userset', { id, object: n.id, rel: r.name }); }); });
       (graphs.model ? graphs.model.nodes : []).forEach((n) => { if (n.kind === 'rel' && n.id.toLowerCase().includes(q)) add(n.id, n.id, 'model', 'relation', n); });

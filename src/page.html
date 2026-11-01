@@ -121,6 +121,7 @@
           <button data-mode="schema" aria-pressed="true">Schema</button>
           <button data-mode="model" aria-pressed="false" title="How one relation is computed, as the tree Check walks">Resolution</button>
           <button data-mode="data" aria-pressed="false">Data</button>
+          <button data-mode="matrix" aria-pressed="false" title="Access matrix: who holds which relation on which object, direct or derived">Matrix</button>
         </div>
         <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" hidden>subjects</button>
         <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>
@@ -172,6 +173,7 @@
         <svg id="graph-svg" role="img" aria-label="Authorization graph"></svg>
         <div class="graph-tip" id="graph-tip" hidden></div>
         <div class="graph-empty" id="graph-empty" hidden></div>
+        <div class="matrix" id="matrix"></div>
       </div>
       <div class="graph-status">
         <span id="graph-status"></span>
@@ -180,6 +182,9 @@
         </div>
         <div class="legend" id="legend-model" hidden>
           <span><b>∨</b> any of · <b>∧</b> all of · <b>∖</b> but not</span><span><i></i>direct subjects</span><span><i class="computed"></i>computed (implied)</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>↻</b> recursive</span><span><b>+</b> expand a branch</span>
+        </div>
+        <div class="legend" id="legend-matrix" hidden>
+          <span><b class="mx-k direct"></b> direct tuple</span><span><b class="mx-k derived"></b> derived (computed, userset or parent)</span><span><b class="mx-k public"></b> public wildcard</span><span><b class="mx-x">✕</b> excluded by "but not"</span><span id="legend-mx-diff" hidden><b class="dadd">+ gained</b> <b class="drem">− lost</b> vs the compared model</span><span>click a cell to Check it</span>
         </div>
         <div class="legend" id="legend-data" hidden>
           <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><i class="derived"></i>derived access</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
