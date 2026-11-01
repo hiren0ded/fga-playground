@@ -1405,7 +1405,8 @@
       const ok = f.kind === 'users' ? (f.result && (f.result.users.size || f.result.wildcard)) : f.kind === 'listobjects' ? (f.result && f.result.length) : f.result === true;
       const st = ok ? 'ok' : (f.result === null ? 'read' : 'fail');
       put(hl.modelNodes, f.modelNode, st);
-      if (f.object && !f.object.endsWith(':?')) put(hl.dataNodes, f.object, st);
+      // the object and, for the instance graph, the userset slot (`object#relation`) the frame resolved
+      if (f.object && !f.object.endsWith(':?')) { put(hl.dataNodes, f.object, st); put(hl.dataNodes, `${f.object}#${f.modelNode.split('#')[1]}`, st); }
     }
     hl.tupleIds = uniq(hl.tupleIds);
     return hl;

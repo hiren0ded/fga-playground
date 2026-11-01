@@ -256,7 +256,7 @@ user:* viewer document:readme
     const relations = S.effectiveModel ? Array.from(new Set(S.effectiveModel.types.flatMap((t) => t.relations.map((r) => r.name)))) : [];
     const baseModel = compareBase(st);
     Graph.setPins(st.pins); Graph.setCollapsed(st.collapsed);
-    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel });
+    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel, store: S.store });
     renderCompareSelect(st);
     renderResSelect();
     renderTimeTravelBanner(st);
@@ -466,7 +466,7 @@ user:* viewer document:readme
       else { missing = need(['object', 'relation']); if (!missing.length) res = FGA.expand(model, store, { object: q.object, relation: q.relation }); }
       if (missing.length) {
         if (!auto) toast(`Fill in the ${missing.join(' and ')} first`);
-        S.result = null; Graph.highlight(null);
+        S.result = null; Graph.highlight(null); Graph.setPathObjects(q.object ? [q.object] : []);
         resultEl.innerHTML = `<div class="empty">Fill in the ${esc(missing.join(' and '))} to run. Click a node in the graph, or pick a suggestion.</div>`;
         clearExplain(); $('#try-chips').hidden = !$('#try-chips').children.length;
         return;
@@ -475,6 +475,8 @@ user:* viewer document:readme
       S.result = { type: q.type, q: Object.assign({}, q, { contextObj: ctx.value }), res, ms };
       S.summaryHl = res.trace && res.trace.events.length ? FGA.summaryHighlight(res.trace) : null;
       if (q.type === 'check' && res.root) { S.result.chains = FGA.proofChains(res.root.proof); S.result.proofHl = proofHighlight(S.result.chains); }
+      // the instance graph opens the objects this query walked as cards
+      Graph.setPathObjects(Object.keys(S.summaryHl ? S.summaryHl.dataNodes : {}).filter((k) => !k.includes('#')).concat(q.object && !q.object.endsWith(':?') ? [q.object] : [], res.objects || []));
       renderResult();
       if (res.trace && res.trace.events.length) {
         buildTraceTree(res.trace);
@@ -495,6 +497,7 @@ user:* viewer document:readme
       chains.forEach((c) => c.segments.forEach((sg) => { hl.dataEdges[`t${sg.tupleId}`] = 'ok'; hl.dataNodes[sg.from] = 'ok'; hl.dataNodes[sg.to] = 'ok'; hl.tupleIds.push(sg.tupleId); }));
       if (S.summaryHl) {
         hl.modelNodes = S.summaryHl.modelNodes; hl.modelEdges = S.summaryHl.modelEdges; hl.rewrites = S.summaryHl.rewrites;
+        Object.entries(S.summaryHl.dataNodes || {}).forEach(([k, v]) => { if (k.includes('#') && !hl.dataNodes[k]) hl.dataNodes[k] = v; });
         // branches the resolver tried and rejected stay visible as ghosts
         Object.entries(S.summaryHl.dataEdges || {}).forEach(([k, v]) => { if (!hl.dataEdges[k]) hl.dataEdges[k] = 'ghost'; });
         Object.entries(S.summaryHl.dataNodes || {}).forEach(([k, v]) => { if (!hl.dataNodes[k]) hl.dataNodes[k] = v === 'fail' ? 'ghost' : 'read'; });
@@ -640,7 +643,10 @@ user:* viewer document:readme
         const hl = { modelNodes: Object.assign({}, e.hl.modelNodes || {}), modelEdges: Object.assign({}, e.hl.modelEdges || {}), dataNodes: Object.assign({}, e.hl.dataNodes || {}), dataEdges: Object.assign({}, e.hl.dataEdges || {}), rewrites: e.hl.rewrites || null };
         if (e.frame.modelNode && !hl.modelNodes[e.frame.modelNode]) hl.modelNodes[e.frame.modelNode] = 'active';
         if (e.frame.object && !e.frame.object.endsWith(':?') && !hl.dataNodes[e.frame.object]) hl.dataNodes[e.frame.object] = 'active';
-        let p = e.frame.parent; while (p) { if (p.modelNode && !hl.modelNodes[p.modelNode]) hl.modelNodes[p.modelNode] = 'read'; if (p.object && !p.object.endsWith(':?') && !hl.dataNodes[p.object]) hl.dataNodes[p.object] = 'read'; p = p.parent; }
+        const slotOf = (f) => (f.modelNode && f.object && !f.object.endsWith(':?') ? `${f.object}#${f.modelNode.split('#')[1]}` : null);
+        const slot = slotOf(e.frame);
+        if (slot && !hl.dataNodes[slot]) hl.dataNodes[slot] = e.type === 'exit' ? (e.status === 'ok' ? 'ok' : e.status === 'fail' ? 'fail' : 'read') : 'active';
+        let p = e.frame.parent; while (p) { if (p.modelNode && !hl.modelNodes[p.modelNode]) hl.modelNodes[p.modelNode] = 'read'; if (p.object && !p.object.endsWith(':?') && !hl.dataNodes[p.object]) hl.dataNodes[p.object] = 'read'; const ps = slotOf(p); if (ps && !hl.dataNodes[ps]) hl.dataNodes[ps] = 'read'; p = p.parent; }
         Graph.highlight(hl, { stepping: true });
       }
       Inspector.highlightTuples(last ? (r.type === 'check' && r.res.allowed && r.proofHl ? r.proofHl.tupleIds : S.summaryHl.tupleIds) : (e.hl.tupleIds || []), last);
@@ -952,7 +958,7 @@ user:* viewer document:readme
     persist();
   }
   $$('#pane-editor .pane-tabs button').forEach((b) => b.addEventListener('click', () => setEditorTab(b.dataset.tab)));
-  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: every tuple as an edge from user to object' };
+  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: tuples as edges into object#relation slots — objects the query walked open as cards' };
   function syncGraphToolbar() {
     const m = Graph.mode;
     $$('#graph-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
@@ -961,11 +967,14 @@ user:* viewer document:readme
     const st = activeStore(); if (st) $('#compare-wrap').hidden = m !== 'schema' || !st.models.length;
     $('#res-wrap').hidden = m !== 'model' || !S.effectiveModel;
     if (m === 'model') renderResSelect();
+    $('#cards-wrap').hidden = m !== 'data';
+    $('#cards-select').value = Graph.cardsMode;
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
   }
   function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
   Graph.on('rootChanged', () => renderResSelect());
+  $('#cards-select').addEventListener('change', () => { S.ui.cards = $('#cards-select').value; Graph.setCardsMode(S.ui.cards); persist(); });
   $('#btn-connect').addEventListener('click', () => { const on = !Graph.connectMode; Graph.setConnectMode(on); $('#btn-connect').setAttribute('aria-pressed', String(on)); if (on) toast('Connect mode: drag from a user to an object to write a tuple'); });
   // layout & export menu
   const gmenu = $('#gmenu');
@@ -989,7 +998,7 @@ user:* viewer document:readme
       items = Graph.candidates(input.value);
       sel = 0;
       list.hidden = !items.length;
-      list.innerHTML = items.map((it, i) => `<button class="find-item${i === sel ? ' on' : ''}" data-i="${i}"><span class="k">${esc(it.kind)}</span><code>${esc(it.label)}</code>${it.mode !== Graph.mode ? `<span class="m">in ${esc(it.mode === 'model' ? 'resolver' : it.mode)} view</span>` : ''}</button>`).join('');
+      list.innerHTML = items.map((it, i) => `<button class="find-item${i === sel ? ' on' : ''}" data-i="${i}"><span class="k">${esc(it.kind)}</span><code>${esc(it.label)}</code>${it.mode !== Graph.mode ? `<span class="m">in ${esc(it.mode === 'model' ? 'resolution' : it.mode)} view</span>` : ''}</button>`).join('');
       $$('.find-item', list).forEach((b) => b.addEventListener('mousedown', (ev) => { ev.preventDefault(); go(+b.dataset.i); }));
     };
     const go = (i) => { const it = items[i]; if (!it) return; Graph.jumpTo(it); list.hidden = true; input.value = ''; input.blur(); };
@@ -1007,19 +1016,22 @@ user:* viewer document:readme
   Graph.on('reveal', (r) => { if (r && r.line) dslEditor.revealLine(r.line); });
   Graph.on('condInfo', (tuples) => tuples.map((t) => { const r = FGA.evaluateCondition(S.effectiveModel, t, Query.contextObj()); const def = S.effectiveModel.condMap.get(t.condition.name); return `<div class="sub">⚡ ${esc(t.condition.name)}: <code style="display:inline">${esc(def ? def.expression : '?')}</code> → ${r.error ? '<span style="color:var(--warn)">' + esc(r.error) + '</span>' : r.ok ? '<span style="color:var(--ok)">true</span>' : '<span style="color:var(--bad)">false</span>'} with the current query context</div>`; }).join(''));
   // connect: drag from one node to another writes a tuple
-  Graph.on('connect', (from, to, ev) => {
+  Graph.on('connect', (from, to, ev, slots = {}) => {
     const m = S.effectiveModel; if (!m) return;
     const toType = m.typeMap.get(to.type); if (!toType || !toType.relations.length) { toast(`${to.id} is a subject type; drag onto an object instead`); return; }
     const fromType = m.typeMap.get(from.type);
+    const fromRel = slots.fromSlot ? slots.fromSlot.split('#')[1] : null, toRel = slots.toSlot ? slots.toSlot.split('#')[1] : null;
     const options = [];
     for (const r of toType.relations) for (const e of r.directTypes) {
       if (e.type !== from.type) continue;
+      if (toRel && r.name !== toRel) continue;
       if (e.wildcard) { if (from.kind === 'wildcard') options.push({ rel: r.name, user: `${from.type}:*`, cond: e.condition }); continue; }
       if (from.kind === 'wildcard') continue;
-      if (e.relation) { if (fromType && fromType.relMap.has(e.relation)) options.push({ rel: r.name, user: `${from.id}#${e.relation}`, cond: e.condition }); }
-      else options.push({ rel: r.name, user: from.id, cond: e.condition });
+      if (e.relation) { if (fromType && fromType.relMap.has(e.relation) && (!fromRel || fromRel === e.relation)) options.push({ rel: r.name, user: `${from.id}#${e.relation}`, cond: e.condition }); }
+      else if (!fromRel) options.push({ rel: r.name, user: from.id, cond: e.condition });
     }
-    if (!options.length) { toast(`No relation on ${to.type} accepts ${from.type}${from.kind === 'wildcard' ? ':*' : ''} directly`); return; }
+    if (!options.length) { toast(toRel ? `${toRel} on ${to.type} does not accept ${from.id}${fromRel ? '#' + fromRel : ''} directly` : `No relation on ${to.type} accepts ${from.type}${from.kind === 'wildcard' ? ':*' : ''}${fromRel ? '#' + fromRel : ''} directly`); return; }
+    if (options.length === 1 && (toRel || fromRel)) { const o = options[0]; writeTupleLine(`${o.user} ${o.rel} ${to.id}${o.cond ? ' with ' + o.cond + ' {}' : ''}`); return; }
     CtxMenu.open(ev, `${esc(from.id)} → ${esc(to.id)}`, 'write a tuple', options.map((o) => ({ label: `${o.user} ${o.rel} ${to.id}${o.cond ? ' with ' + o.cond : ''}`, run: () => writeTupleLine(`${o.user} ${o.rel} ${to.id}${o.cond ? ' with ' + o.cond + ' {}' : ''}`) })));
   });
   function writeTupleLine(line) {
@@ -1055,15 +1067,36 @@ user:* viewer document:readme
   })();
   Graph.on('context', ({ kind, datum, mode }, ev) => {
     NodeMenu.close();
+    if (kind === 'edge' && mode === 'data' && datum.derived) {
+      const t = S.store.byId(datum.tupleId);
+      CtxMenu.open(ev, `${esc(datum.fromSlot || datum.from)} → ${esc(datum.toSlot)}`, 'derived', [
+        { k: 'why', label: `${datum.computed} from ${datum.tupleset}: whoever is ${datum.computed} of ${datum.from} is ${datum.rel} of ${datum.to}`, run: () => { Graph.setResolutionRoot(`${datum.to.split(':')[0]}#${datum.rel}`); setGraphMode('model'); } },
+        ...(t ? [{ k: 'delete', label: `delete the tuple behind it: ${FGA.formatTuple(t, { plain: true })}`, danger: true, disabled: !!t.contextual || !!S.timeTravel, run: () => deleteTupleLines([t.line]) }] : []),
+        { k: 'focus', label: `focus ${datum.to}`, run: () => Graph.focusNode(datum.to) },
+      ]);
+      return;
+    }
     if (kind === 'edge' && mode === 'data') {
       const tuples = datum.tupleIds.map((id) => S.store.byId(id)).filter(Boolean);
       CtxMenu.open(ev, `${esc(datum.from)} → ${esc(datum.to)}`, 'tuples', tuples.map((t) => ({ k: 'delete', label: FGA.formatTuple(t, { plain: true }), danger: true, disabled: !!t.contextual || !!S.timeTravel, run: () => deleteTupleLines([t.line]) })).concat([{ k: 'focus', label: `focus ${datum.to}`, run: () => Graph.focusNode(datum.to) }]));
       return;
     }
+    if (kind === 'slot' && mode === 'data') {
+      const tuples = S.store.tuples.filter((t) => !t.contextual && t.object.raw === datum.object && t.relation === datum.rel);
+      CtxMenu.open(ev, esc(datum.id), 'userset', [
+        { k: 'queries', label: 'open the query menu', run: () => NodeMenu.open(datum, 'data', ev) },
+        { k: 'resolve', label: `show how ${datum.type}#${datum.rel} resolves`, run: () => { Graph.setResolutionRoot(`${datum.type}#${datum.rel}`); setGraphMode('model'); } },
+        ...(datum.line ? [{ k: 'go to', label: `line ${datum.line} in the model`, run: () => { dslEditor.scrollToLine(datum.line); setEditorTab('dsl'); } }] : []),
+        { k: 'delete', label: `delete the ${tuples.length} tuple${tuples.length === 1 ? '' : 's'} into this slot`, danger: true, disabled: !tuples.length || !!S.timeTravel, run: () => deleteTupleLines(tuples.map((t) => t.line)) },
+      ]);
+      return;
+    }
     if (kind === 'node' && mode === 'data') {
       const tuples = S.store.tuples.filter((t) => !t.contextual && (t.object.raw === datum.id || `${t.user.type}:${t.user.id}` === datum.id || (t.user.wildcard && `${t.user.type}:*` === datum.id)));
+      const hasRels = datum.kind === 'object' && S.effectiveModel && S.effectiveModel.typeMap.get(datum.type) && S.effectiveModel.typeMap.get(datum.type).relations.length;
       CtxMenu.open(ev, esc(datum.id), 'node', [
         { k: 'queries', label: 'open the query menu', run: () => NodeMenu.open(datum, 'data', ev) },
+        ...(hasRels ? [{ k: 'card', label: datum.card ? 'collapse to a plain node' : 'open as a card: one slot per relation', run: () => Graph.toggleCard(datum.id, !datum.card) }] : []),
         { k: 'focus', label: 'focus · in · all hops', run: () => { Graph.focusNode(datum.id); } },
         { k: 'write', label: 'drag to another node with Alt held, or turn on connect mode', run: () => { Graph.setConnectMode(true); $('#btn-connect').setAttribute('aria-pressed', 'true'); toast('Connect mode on'); } },
         { k: 'delete', label: `delete all ${tuples.length} tuple${tuples.length === 1 ? '' : 's'} touching this node`, danger: true, disabled: !tuples.length || !!S.timeTravel, run: () => deleteTupleLines(tuples.map((t) => t.line)) },
@@ -1187,6 +1220,15 @@ user:* viewer document:readme
         return { title: `type ${n.type}`, def: `${t.relations.length} relations: ${t.relations.map((r) => r.name).join(', ')}\n${objs.length} object${objs.length === 1 ? '' : 's'} in the store`, acts };
       }
       // data graph
+      if (n.kind === 'slot') {
+        const u = firstUser();
+        acts.push({ type: 'listUsers', object: n.object, relation: n.rel, userType: userTypeOf(u) });
+        acts.push({ type: 'expand', object: n.object, relation: n.rel });
+        acts.push({ type: 'check', user: u, relation: n.rel, object: n.object });
+        const ot = m.types.find((x) => x.relations.some((rr) => rr.directTypes.some((e) => e.type === n.type && e.relation === n.rel)));
+        if (ot) { const rr = ot.relations.find((x) => x.directTypes.some((e) => e.type === n.type && e.relation === n.rel)); acts.push({ type: 'listObjects', user: `${n.object}#${n.rel}`, relation: rr.name, objectType: ot.name }); }
+        return { title: n.id, def: `${n.def}\n${n.direct} direct tuple${n.direct === 1 ? '' : 's'} into this userset${n.derived ? ` · ${n.derived} derived link${n.derived === 1 ? '' : 's'}` : ''}`, acts };
+      }
       const t = m.typeMap.get(n.type);
       const isSubject = n.kind === 'wildcard' || !t || !t.relations.length;
       if (isSubject) {
@@ -1369,6 +1411,7 @@ user:* viewer document:readme
     setEditorTab(S.ui.editorTab || 'dsl');
     Graph.setSubjects(!!S.ui.subjectEdges); $('#btn-subjects').setAttribute('aria-pressed', String(!!S.ui.subjectEdges));
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
+    if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
     setGraphMode(S.ui.graphMode || 'schema');
     toggleInspector(S.ui.inspOpen !== false);
     switchStore(S.activeStoreId);

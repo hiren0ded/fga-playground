@@ -156,6 +156,8 @@
     MARKERS.forEach((k) => {
       defs.append('marker').attr('id', `arrow-${k}`).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 9).attr('markerHeight', 9).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
         .append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('class', `mk mk-${k}`);
+      defs.append('marker').attr('id', `arrow-s-${k}`).attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
+        .append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('class', `mk mk-${k}`);
     });
     const root = svg.append('g').attr('class', 'viewport');
     const gClusters = root.append('g').attr('class', 'layer-clusters');
@@ -177,6 +179,8 @@
     let graphs = { schema: null, model: null, data: null };
     let mode = 'schema', layoutPreset = 'auto';
     let treeRoot = null, treeQueryKey = null, treeExpanded = new Map();
+    // instance graph (data view): which objects open as cards with one slot per relation
+    let cardsMode = 'path', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
     let typeIndex = new Map(), relIndex = new Map();
     let curVG = null, curL = null, bounds = null, lastStage = { w: 0, h: 0 }, insetBottom = 0;
     let currentHl = null, lastOpts = {}, hoverHl = null, focus = null;
@@ -192,9 +196,12 @@
     const emit = (k, ...a) => { if (handlers[k]) return handlers[k](...a); return undefined; };
 
     // ── public setters
-    function setData({ schema, model, data, types, relations, modelObj }) {
+    function setData({ schema, model, data, types, relations, modelObj, store }) {
       graphs = { schema, model, data };
       modelRef = modelObj || null;
+      storeRef = store || null;
+      modelEdgesCache = modelRef ? FGA.modelEdges(modelRef) : null;
+      cardOverride.forEach((v, id) => { if (!(data && data.nodes.some((n) => n.id === id))) cardOverride.delete(id); });
       typeIndex = new Map(types.map((t, i) => [t, i]));
       relIndex = new Map((relations || []).map((r, i) => [r, i]));
       hiddenRels.forEach((r) => { if (!relIndex.has(r)) hiddenRels.delete(r); });
@@ -203,6 +210,15 @@
     function setMode(m) { mode = m; focus = null; hoverHl = null; render(false); }
     function setLayout(p) { layoutPreset = p; render(true); }
     function setSubjects() { /* kept for API compatibility; the resolution view has no subject fan-out */ }
+    // instance graph: 'path' = cards for the objects the current query touched, 'all', or 'none'
+    function setCardsMode(m) { if (!['path', 'all', 'none'].includes(m)) m = 'path'; if (m === cardsMode) return; cardsMode = m; cardOverride.clear(); if (mode === 'data') render(true); }
+    function setPathObjects(ids) {
+      const next = new Set((ids || []).filter(Boolean));
+      const same = next.size === pathObjects.size && Array.from(next).every((x) => pathObjects.has(x));
+      pathObjects = next;
+      if (!same && mode === 'data' && cardsMode === 'path') render(true);
+    }
+    function toggleCard(id, on) { cardOverride.set(id, !!on); render(true); }
     // resolution view: which relation is drawn. null = follow the current query.
     function resolutionKey() {
       if (!modelRef) return null;
@@ -232,22 +248,70 @@
         if (!key || !modelRef) return null;
         return rewriteTree(modelRef, key, treeExpanded);
       }
-      // data: merge parallel tuples between the same two nodes into one edge
+      return instanceGraph(g0);
+    }
+    // ── instance graph (data view)
+    // OpenFGA reasons about usersets — `doc:roadmap#viewer`, not `doc:roadmap` — so an object whose type has
+    // relations can open as a card with one slot per relation. Tuples then point at the slot they grant,
+    // userset subjects start from a slot on their own card, computed relations become links between the
+    // rows of one card, and "X from Y" becomes a derived edge from the parent's slot to the child's.
+    // Objects that stay plain nodes keep the classic one-edge-per-tuple drawing.
+    function instanceGraph(g0) {
+      const m = modelRef, store = storeRef;
+      const typeOf = (t) => (m ? m.typeMap.get(t) : null);
+      const canCard = (n) => { if (n.kind !== 'object') return false; const t = typeOf(n.type); return !!(t && t.relations.length); };
+      const wantCard = (n) => { if (!canCard(n)) return false; if (cardOverride.has(n.id)) return cardOverride.get(n.id); return cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(n.id); };
+      const nodes = g0.nodes.map((n) => {
+        if (!wantCard(n)) return Object.assign({}, n, { expandable: canCard(n) });
+        const t = typeOf(n.type);
+        const rows = t.relations.map((r) => ({ id: `${n.id}#${r.name}`, kind: 'slot', rel: r.name, object: n.id, type: n.type, label: `${n.id}#${r.name}`, def: `define ${r.name}: ${FGA.describeRewrite(r.rewrite)}`, short: FGA.describeRewrite(r.rewrite), direct: 0, derived: 0, directTypes: r.directTypes.map(FGA.describeEntry), line: r.line }));
+        return Object.assign({}, n, { kind: 'inst', card: true, rows, rowMap: new Map(rows.map((r) => [r.rel, r])), links: [] });
+      });
+      const byId = new Map(nodes.map((n) => [n.id, n]));
       const groups = new Map();
       for (const e of g0.edges) {
-        const key = `g:${e.from}→${e.to}`;
+        const toN = byId.get(e.to), fromN = byId.get(e.from);
+        const toSlot = toN.kind === 'inst' && toN.rowMap.has(e.label) ? `${e.to}#${e.label}` : null;
+        const fromSlot = e.userset && fromN.kind === 'inst' && fromN.rowMap.has(e.userset) ? `${e.from}#${e.userset}` : null;
+        const key = `g:${fromSlot || e.from}→${toSlot || e.to}`;
         let gr = groups.get(key);
-        if (!gr) { gr = { id: key, from: e.from, to: e.to, tupleIds: [], rels: [], labels: [], usersets: [], conditions: [], contextual: false, wildcard: /:\*$/.test(e.from), kind: 'tuple' }; groups.set(key, gr); }
+        if (!gr) { gr = { id: key, from: e.from, to: e.to, fromSlot, toSlot, tupleIds: [], rels: [], labels: [], usersets: [], conditions: [], contextual: false, wildcard: /:\*$/.test(e.from), kind: 'tuple' }; groups.set(key, gr); }
         gr.tupleIds.push(e.tupleId);
         if (!gr.rels.includes(e.label)) gr.rels.push(e.label);
-        gr.labels.push(e.label + (e.userset ? ` ⟵ #${e.userset}` : '') + (e.condition ? ' ⚡' : ''));
+        const lbl = toSlot ? ((e.userset && !fromSlot ? `#${e.userset}` : '') + (e.condition ? ' ⚡' : '')).trim() : e.label + (e.userset ? ` ⟵ #${e.userset}` : '') + (e.condition ? ' ⚡' : '');
+        if (lbl) gr.labels.push(lbl);
         if (e.userset && !gr.usersets.includes(e.userset)) gr.usersets.push(e.userset);
         if (e.condition && !gr.conditions.includes(e.condition)) gr.conditions.push(e.condition);
         if (e.contextual) gr.contextual = true;
+        if (toSlot) toN.rowMap.get(e.label).direct++;
       }
       const edges = Array.from(groups.values());
-      edges.forEach((e) => { e.rel = e.rels[0]; e.label = Array.from(new Set(e.labels)).join(', '); e.reverse = groups.has(`g:${e.to}→${e.from}`); });
-      return { nodes: g0.nodes.map((n) => Object.assign({}, n)), edges, clusters: [] };
+      edges.forEach((e) => { e.rel = e.rels[0]; e.label = Array.from(new Set(e.labels)).join(', '); });
+      // derived structure: computed links inside a card, tuple-to-userset edges into a card
+      if (m && store && modelEdgesCache) {
+        nodes.forEach((n) => {
+          if (n.kind !== 'inst') return;
+          for (const me of modelEdgesCache) {
+            if (me.type !== n.type) continue;
+            if (me.kind === 'computed') {
+              if (!n.rowMap.has(me.via) || !n.rowMap.has(me.relation)) continue;
+              n.links.push({ id: `cmp:${n.id}:${me.via}>${me.relation}`, from: me.via, to: me.relation, gid: me.gid, ctx: me.ctx, object: n.id });
+              n.rowMap.get(me.relation).derived++;
+            } else if (me.kind === 'ttu') {
+              for (const t of store.read(n.id, me.tupleset)) {
+                if (t.user.relation || t.user.wildcard || t.user.type !== me.parentType) continue;
+                const pid = `${t.user.type}:${t.user.id}`; const pn = byId.get(pid); if (!pn) continue;
+                const fromSlot = pn.kind === 'inst' && pn.rowMap.has(me.computed) ? `${pid}#${me.computed}` : null;
+                edges.push({ id: `ttu:${t.id}:${me.relation}`, kind: 'ttu', derived: true, from: pid, to: n.id, fromSlot, toSlot: `${n.id}#${me.relation}`, tupleIds: [t.id], tupleId: t.id, rel: me.relation, rels: [me.relation], labels: [], usersets: [], conditions: [], contextual: !!t.contextual, wildcard: false, gid: me.gid, ctx: me.ctx, tupleset: me.tupleset, computed: me.computed, label: fromSlot ? `from ${me.tupleset}` : `${me.computed} from ${me.tupleset}` });
+                n.rowMap.get(me.relation).derived++;
+              }
+            }
+          }
+        });
+      }
+      const pairs = new Set(edges.map((e) => `${e.from}|${e.to}`));
+      edges.forEach((e) => { e.reverse = pairs.has(`${e.to}|${e.from}`); });
+      return { nodes, edges, clusters: [] };
     }
 
     // ── sizes
@@ -275,8 +339,30 @@
         n.width = Math.ceil(measure(n.label, MONO)) + 26 + (n.condition ? measure(` ⚡${n.condition}`, MONO_S) + 4 : 0); n.height = 26; // subject
         return;
       }
-      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0);
+      if (n.kind === 'inst') {
+        const nameW = Math.max(0, ...n.rows.map((r) => measure(r.rel, MONO_S)));
+        n.nameColW = Math.ceil(nameW) + 14;
+        n.arcW = n.links.length ? 20 + Math.min(n.links.length, 4) * 3 : 0;
+        let w = Math.max(measure(n.label, MONO) + 12 + 14 + measure(n.type, MONO_S) + 12 + 22, 170);
+        n.rows.forEach((r) => { r.defShort = r.short; w = Math.max(w, 12 + n.nameColW + measure(r.short, MONO_S) + 16 + n.arcW); });
+        w = Math.min(CARD_W_MAX, Math.ceil(w));
+        n.rows.forEach((r) => {
+          const room = w - 12 - n.nameColW - 16 - n.arcW;
+          if (measure(r.short, MONO_S) > room) { let t = r.short; while (t.length > 4 && measure(t + '…', MONO_S) > room) t = t.slice(0, -1); r.defShort = t + '…'; }
+        });
+        n.width = w; n.height = HDR + 8 + n.rows.length * ROW + 6;
+        return;
+      }
+      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0) + (n.expandable ? 18 : 0);
       n.height = 30;
+    }
+    // y of a slot row's centre, relative to the card's top edge
+    const rowCentre = (i) => HDR + 8 + i * ROW + 8.5;
+    function slotPoint(card, slotId, towardX) {
+      const i = card.rows.findIndex((r) => r.id === slotId);
+      if (i < 0) return null;
+      const right = towardX >= card.x;
+      return { x: card.x + (right ? card.width / 2 : -card.width / 2), y: card.y - card.height / 2 + rowCentre(i) };
     }
     function schemaEdgeText(e) {
       const labels = e.labels.length > 3 ? e.labels.slice(0, 3).concat([`+${e.labels.length - 3}`]) : e.labels;
@@ -291,7 +377,8 @@
     function layoutDagre(vg, rankdir) {
       const compound = false;
       const dg = new dagre.graphlib.Graph({ compound, multigraph: true });
-      const sep = mode === 'schema' ? { nodesep: rankdir === 'LR' ? 40 : 70, ranksep: rankdir === 'LR' ? 130 : 90, edgesep: 24 } : mode === 'model' ? { nodesep: rankdir === 'LR' ? 14 : 18, ranksep: rankdir === 'LR' ? 70 : 46, edgesep: 8 } : { nodesep: 22, ranksep: rankdir === 'LR' ? 100 : 72, edgesep: 14 };
+      const hasCards = mode === 'data' && vg.nodes.some((n) => n.kind === 'inst');
+      const sep = mode === 'schema' ? { nodesep: rankdir === 'LR' ? 40 : 70, ranksep: rankdir === 'LR' ? 130 : 90, edgesep: 24 } : mode === 'model' ? { nodesep: rankdir === 'LR' ? 14 : 18, ranksep: rankdir === 'LR' ? 70 : 46, edgesep: 8 } : hasCards ? { nodesep: 26, ranksep: rankdir === 'LR' ? 120 : 80, edgesep: 14 } : { nodesep: 22, ranksep: rankdir === 'LR' ? 100 : 72, edgesep: 14 };
       dg.setGraph(Object.assign({ rankdir, marginx: 28, marginy: 30, compound }, sep));
       dg.setDefaultEdgeLabel(() => ({}));
       vg.nodes.forEach((n) => { sizeNode(n); dg.setNode(n.id, { width: n.width, height: n.height }); });
@@ -308,7 +395,7 @@
     }
     function markParallel(edges) {
       const groups = new Map();
-      edges.forEach((e) => { const k = e.from < e.to ? `${e.from}|${e.to}` : `${e.to}|${e.from}`; (groups.get(k) || groups.set(k, []).get(k)).push(e); });
+      edges.forEach((e) => { const a = e.fromSlot || e.from, b = e.toSlot || e.to; const k = a < b ? `${a}|${b}` : `${b}|${a}`; (groups.get(k) || groups.set(k, []).get(k)).push(e); });
       groups.forEach((list) => { if (list.length === 1) { list[0].bend = 0; return; } list.forEach((e, i) => { const sign = e.from < e.to ? 1 : -1; e.bend = sign * (i - (list.length - 1) / 2) * 34; }); });
     }
     function layoutLanes(vg) {
@@ -435,6 +522,7 @@
       else if (layoutPreset === 'force' && mode === 'data') L = layoutForce(vg);
       else if (layoutPreset === 'radial' && mode !== 'model') L = layoutRadial(vg, center);
       else if (mode === 'model') L = layoutDagre(vg, 'TB');
+      else if (mode === 'data' && vg.nodes.some((n) => n.kind === 'inst')) L = layoutDagre(vg, 'LR');
       else L = bestOf((dir) => layoutDagre(vg, dir));
       applyPins(L);
       computeClusters(L);
@@ -468,7 +556,7 @@
       const s = Math.min(sx, sy);
       return { x: n.x + dx * s, y: n.y + dy * s };
     }
-    function bezier(a0, b0, bend) {
+    function bezier(a0, b0, bend, forceH) {
       const dx0 = b0.x - a0.x, dy0 = b0.y - a0.y;
       const dist0 = Math.hypot(dx0, dy0) || 1;
       const nx0 = -dy0 / dist0, ny0 = dx0 / dist0;
@@ -477,7 +565,7 @@
       const dx = b.x - a.x, dy = b.y - a.y;
       const dist = Math.hypot(dx, dy) || 1;
       const nx = -dy / dist, ny = dx / dist;
-      const horizontal = Math.abs(dx) >= Math.abs(dy);
+      const horizontal = forceH || Math.abs(dx) >= Math.abs(dy);
       let c1, c2;
       if (horizontal) { c1 = { x: a.x + dx * 0.4, y: a.y }; c2 = { x: b.x - dx * 0.4, y: b.y }; }
       else { c1 = { x: a.x, y: a.y + dy * 0.4 }; c2 = { x: b.x, y: b.y - dy * 0.4 }; }
@@ -491,6 +579,16 @@
       if (e.from === e.to) {
         const x = a.x + a.width / 2 - 10, y = a.y - a.height / 2;
         return { d: `M${x - 14},${y} C${x - 14},${y - 30} ${x + 26},${y - 30} ${x + 10},${y - 2}`, mid: { x: a.x + a.width / 2, y: y - 24 } };
+      }
+      if (mode === 'data' && (e.fromSlot || e.toSlot)) {
+        // slot edges leave and enter cards at the row they concern
+        const pb0 = e.toSlot && b.kind === 'inst' ? slotPoint(b, e.toSlot, a.x) : null;
+        const pa0 = e.fromSlot && a.kind === 'inst' ? slotPoint(a, e.fromSlot, b.x) : null;
+        if (pa0 || pb0) {
+          const pa = pa0 || anchor(a, (pb0 || b).x, (pb0 || b).y);
+          const pb = pb0 || anchor(b, pa.x, pa.y);
+          return bezier(pa, pb, e.bend || 0, true);
+        }
       }
       if (e.points && e.points.length) {
         const mid = e.lx != null ? { x: e.lx, y: e.ly } : e.points[Math.floor(e.points.length / 2)];
@@ -578,21 +676,22 @@
       // nodes / cards
       const ng = gNodes.selectAll('g.node').data(L.nodes, (n) => n.id).join(
         (enter) => enter.append('g'), (update) => update, (exit) => exit.remove(),
-      ).attr('class', (n) => `node ${n.kind}${n.pinned ? ' pinned' : ''}${n.diff ? ' diff-' + n.diff : ''}${n.cycle ? ' cycle' : ''}${n.userset ? ' userset' : ''}`).attr('data-id', (n) => n.id).style('--c', (n) => colorOf(n.type));
+      ).attr('class', (n) => `node ${n.kind === 'inst' ? 'card inst' : n.kind}${n.pinned ? ' pinned' : ''}${n.diff ? ' diff-' + n.diff : ''}${n.cycle ? ' cycle' : ''}${n.userset ? ' userset' : ''}`).attr('data-id', (n) => n.id).style('--c', (n) => colorOf(n.type));
       ng.each(function (n) {
         const sel = d3.select(this);
         const tr = `translate(${n.x - n.width / 2},${n.y - n.height / 2})`;
         if (dur && sel.attr('transform')) sel.transition().duration(dur).attr('transform', tr); else sel.attr('transform', tr);
         sel.selectAll('*').remove();
-        if (isCard) drawCard(sel, n); else if (mode === 'model') drawTreeNode(sel, n); else drawNode(sel, n);
+        if (isCard) drawCard(sel, n); else if (n.kind === 'inst') drawInstCard(sel, n); else if (mode === 'model') drawTreeNode(sel, n); else drawNode(sel, n);
       });
       // in the resolution tree only relation and subject nodes answer to queries / menus
       const menuDatum = (n) => (mode !== 'model' ? n : n.kind === 'rel' ? { kind: 'rel', id: n.key, type: n.type, rel: n.rel, label: n.rel, def: n.def, direct: n.direct, line: n.line } : n.kind === 'subject' ? { kind: 'type', type: n.type, label: n.type } : null);
-      ng.on('mouseenter', (ev, n) => { if (isCard) return; showTip(ev, tipForNode(n)); previewFocus(n.id); emit('nodeHover', mode === 'model' ? (n.key || n.subj || null) : n.id); }).on('mousemove', moveTip)
-        .on('mouseleave', () => { if (isCard) return; hideTip(); previewFocus(null); emit('nodeHover', null); })
-        .on('click', (ev, n) => { if (isCard || ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); setFocus(n.id, n, ev); })
-        .on('dblclick', (ev, n) => { if (isCard) return; hideTip(); ev.stopPropagation(); const d = menuDatum(n); if (d) emit('nodeClick', d, mode, ev); })
-        .on('contextmenu', (ev, n) => { if (isCard) return; ev.preventDefault(); ev.stopPropagation(); hideTip(); const d = menuDatum(n); if (d) emit('context', { kind: 'node', datum: d, mode }, ev); });
+      const own = (n) => isCard || n.kind === 'inst'; // cards wire their own header / row handlers
+      ng.on('mouseenter', (ev, n) => { if (own(n)) return; showTip(ev, tipForNode(n)); previewFocus(n.id); emit('nodeHover', mode === 'model' ? (n.key || n.subj || null) : n.id); }).on('mousemove', moveTip)
+        .on('mouseleave', (ev, n) => { if (own(n)) return; hideTip(); previewFocus(null); emit('nodeHover', null); })
+        .on('click', (ev, n) => { if (own(n) || ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); setFocus(n.id, n, ev); })
+        .on('dblclick', (ev, n) => { if (own(n)) return; hideTip(); ev.stopPropagation(); const d = menuDatum(n); if (d) emit('nodeClick', d, mode, ev); })
+        .on('contextmenu', (ev, n) => { if (own(n)) return; ev.preventDefault(); ev.stopPropagation(); hideTip(); const d = menuDatum(n); if (d) emit('context', { kind: 'node', datum: d, mode }, ev); });
       ng.call(dragBehaviour());
       svg.on('click', () => emit('blankClick'));
       svg.on('contextmenu', (ev) => { ev.preventDefault(); emit('context', { kind: 'blank', mode }, ev); });
@@ -638,7 +737,57 @@
       const label = n.kind === 'wildcard' ? `✶ ${n.label}` : n.collapsedCount ? `${n.label}  ${n.collapsedCount} relations` : n.label;
       sel.append('text').attr('x', n.badge ? 6 + n.badgeW + 8 : n.op ? 12 : n.width / 2).attr('y', n.height / 2 + 4).attr('text-anchor', n.op || n.badge ? 'start' : 'middle').text(label);
       if (n.op) sel.append('text').attr('class', 'op').attr('x', n.width - 10).attr('y', n.height / 2 + 4).attr('text-anchor', 'end').text(n.op === 'or' ? '∨' : n.op === 'and' ? '∧' : '¬');
+      if (n.expandable) {
+        sel.select('text').attr('x', (n.width - 18) / 2);
+        const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 20},${n.height / 2 - 6})`).style('cursor', 'pointer');
+        tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
+        tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('+');
+        tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); toggleCard(n.id, true); })
+          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">open ${esc(n.id)} as a card: one slot per relation, tuples pointing at the slot they grant</div>`); });
+      }
       if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
+    }
+    // instance card: an object with one slot (userset) per relation of its type
+    function drawInstCard(sel, n) {
+      const plain = { id: n.id, type: n.type, kind: 'object', label: n.label, tuples: n.tuples, card: true };
+      sel.append('rect').attr('class', 'bg').attr('width', n.width).attr('height', n.height).attr('rx', 10);
+      sel.append('path').attr('class', 'hdr').attr('d', `M10,0 H${n.width - 10} a10,10 0 0 1 10,10 V${HDR} H0 V10 a10,10 0 0 1 10,-10 z`);
+      sel.append('text').attr('class', 'hdr-t').attr('x', 12).attr('y', 18.5).text(n.label);
+      sel.append('text').attr('class', 'hdr-n').attr('x', n.width - 26).attr('y', 18.5).attr('text-anchor', 'end').text(n.type);
+      const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 18},8)`).style('cursor', 'pointer');
+      tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
+      tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('–');
+      tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); toggleCard(n.id, false); })
+        .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">collapse ${esc(n.id)} back to a plain node</div>`); });
+      if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
+      sel.append('rect').attr('class', 'hdr-hit').attr('width', n.width - 30).attr('height', HDR).attr('fill', 'transparent')
+        .on('mouseenter', (ev) => { showTip(ev, tipForNode(plain)); previewFocus(n.id); emit('nodeHover', n.id); }).on('mousemove', moveTip).on('mouseleave', () => { hideTip(); previewFocus(null); emit('nodeHover', null); })
+        .on('click', (ev) => { if (ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); setFocus(n.id, plain, ev); })
+        .on('dblclick', (ev) => { hideTip(); ev.stopPropagation(); emit('nodeClick', plain, 'data', ev); })
+        .on('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'node', datum: plain, mode }, ev); });
+      const rows = sel.selectAll('g.row').data(n.rows).enter().append('g').attr('class', (r) => `row${r.direct || r.derived ? '' : ' empty'}`).attr('data-id', (r) => r.id)
+        .attr('transform', (r, i) => `translate(0,${HDR + 8 + i * ROW + 13})`);
+      rows.append('rect').attr('class', 'row-bg').attr('x', 5).attr('y', -13.5).attr('width', n.width - 10).attr('height', 18).attr('rx', 4);
+      rows.append('text').attr('class', 'rname').attr('x', 12).attr('y', 0).text((r) => r.rel);
+      rows.append('text').attr('class', 'rdef').attr('x', 12 + n.nameColW).attr('y', 0).text((r) => r.defShort);
+      rows.on('mouseenter', (ev, r) => { showTip(ev, tipForSlot(r)); emit('nodeHover', r.id); }).on('mousemove', moveTip).on('mouseleave', () => { hideTip(); emit('nodeHover', null); })
+        .on('click', (ev, r) => { hideTip(); ev.stopPropagation(); emit('nodeClick', r, 'data', ev); })
+        .on('contextmenu', (ev, r) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'slot', datum: r, mode }, ev); });
+      // computed relations: an arc from the implying row to the implied one, down the right margin
+      const idx = new Map(n.rows.map((r, i) => [r.rel, i]));
+      n.links.forEach((l, i) => {
+        const yi = rowCentre(idx.get(l.from)), yj = rowCentre(idx.get(l.to));
+        // arcs live in the card's reserved right margin, staggered so parallel ones stay apart
+        const x0 = n.width - n.arcW + 2 + (i % 4) * 3;
+        const bulge = Math.max(6, n.arcW - 6 - (i % 4) * 3);
+        sel.append('path').datum(l).attr('class', `ilink computed${l.ctx === 'exclusion' ? ' exclusion' : ''}`).attr('data-id', l.id).attr('d', `M${x0},${yi} C${x0 + bulge},${yi} ${x0 + bulge},${yj} ${x0 + 1},${yj}`).attr('marker-end', `url(#arrow-s-${l.ctx === 'exclusion' ? 'exclusion' : 'computed'})`)
+          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<code>${esc(l.to)} ⇐ ${esc(l.from)}</code><div class="sub">${l.ctx === 'exclusion' ? `anyone who is <b>${esc(l.from)}</b> of ${esc(n.id)} is <b>excluded</b> from ${esc(l.to)}` : `anyone who is <b>${esc(l.from)}</b> of ${esc(n.id)} is also <b>${esc(l.to)}</b>${l.ctx === 'intersection' ? ' (one of several conditions that must all hold)' : ''}`}</div>`); }).on('mousemove', moveTip).on('mouseleave', hideTip);
+      });
+    }
+    function tipForSlot(r) {
+      const ts = storeRef ? storeRef.read(r.object, r.rel) : [];
+      const lines = ts.slice(0, 6).map((t) => FGA.formatTuple(t)).join('\n');
+      return `<code>${esc(r.id)}</code><div class="sub">${esc(r.def)}</div><div class="sub">${ts.length} direct tuple${ts.length === 1 ? '' : 's'}${r.derived ? ` · ${r.derived} derived link${r.derived === 1 ? '' : 's'}` : ''}${r.directTypes.length ? ' · assignable: ' + esc(r.directTypes.join(', ')) : ' · computed only'}</div>${lines ? `<code>${esc(lines)}${ts.length > 6 ? '\n…' : ''}</code>` : ''}<div class="sub">click for queries on this userset · right-click for more · Alt-drag a subject here to write a tuple</div>`;
     }
     function drawCard(sel, n) {
       sel.append('rect').attr('class', 'bg').attr('width', n.width).attr('height', n.height).attr('rx', 10);
@@ -671,11 +820,11 @@
 
     // ── drag: move nodes (pin them) or, in connect mode / with Alt, draw a new tuple
     function dragBehaviour() {
-      let start = null, connecting = false, tempLine = null, incident = [];
+      let start = null, connecting = false, tempLine = null, incident = [], fromSlot = null;
       return d3.drag().clickDistance(4)
         .on('start', function (ev, n) {
           connecting = connectMode || !!(ev.sourceEvent && ev.sourceEvent.altKey);
-          if (connecting) { if (mode !== 'data') { connecting = false; return; } tempLine = gTemp.append('path').attr('class', 'connect-line'); return; }
+          if (connecting) { if (mode !== 'data') { connecting = false; return; } const rowEl = ev.sourceEvent && ev.sourceEvent.target.closest && ev.sourceEvent.target.closest('g.row'); fromSlot = rowEl ? rowEl.getAttribute('data-id') : null; tempLine = gTemp.append('path').attr('class', 'connect-line'); return; }
           start = { x: n.x, y: n.y, raised: false };
           incident = curL.edges.filter((e) => e.from === n.id || e.to === n.id);
         })
@@ -695,8 +844,10 @@
             const se = ev.sourceEvent;
             const el = se && document.elementFromPoint(se.clientX, se.clientY);
             const targetEl = el && el.closest('g.node');
+            const rowEl = el && el.closest('g.row');
             const target = targetEl && curL.nodes.find((m) => m.id === targetEl.getAttribute('data-id'));
-            if (target && target.id !== n.id) emit('connect', n, target, se);
+            if (target && target.id !== n.id) emit('connect', n, target, se, { fromSlot, toSlot: rowEl ? rowEl.getAttribute('data-id') : null });
+            fromSlot = null;
             return;
           }
           if (!start) return;
@@ -734,9 +885,13 @@
         return `<code>${esc(n.label)}</code><div class="sub">${n.wildcard ? `a public grant: every ${esc(n.type)}` : `a subject of type ${esc(n.type)}`}${n.condition ? ` · only while condition <b>${esc(n.condition)}</b> holds` : ''}</div>`;
       }
       const tuples = (n.tuples || []).slice(0, 6).map((id) => S.store && S.store.byId(id)).filter(Boolean).map((t) => FGA.formatTuple(t));
-      return `<code>${esc(n.label)}</code><div class="sub">${n.kind === 'wildcard' ? 'public access: every ' + esc(n.type) : 'type ' + esc(n.type)} · ${n.tuples.length} tuple${n.tuples.length === 1 ? '' : 's'}</div>${degreeInfo(n.id)}<code>${esc(tuples.join('\n'))}${n.tuples.length > 6 ? '\n…' : ''}</code><div class="sub">click to focus · double-click for queries · drag to move · Alt-drag to another node to write a tuple</div>`;
+      return `<code>${esc(n.label)}</code><div class="sub">${n.kind === 'wildcard' ? 'public access: every ' + esc(n.type) : 'type ' + esc(n.type)} · ${n.tuples.length} tuple${n.tuples.length === 1 ? '' : 's'}</div>${degreeInfo(n.id)}<code>${esc(tuples.join('\n'))}${n.tuples.length > 6 ? '\n…' : ''}</code><div class="sub">click to focus · double-click for queries · drag to move · Alt-drag to another node to write a tuple${n.card ? ' · – collapses the card' : n.expandable ? ' · + opens it as a card' : ''}</div>`;
     }
     function tipForEdge(e) {
+      if (mode === 'data' && e.derived) {
+        const t = storeRef && storeRef.byId(e.tupleId);
+        return `<code>${esc(e.fromSlot || e.from)} → ${esc(e.toSlot)}</code><div class="sub">derived, not a tuple: <b>${esc(e.computed)} from ${esc(e.tupleset)}</b> — whoever is ${esc(e.computed)} of ${esc(e.from)} is ${esc(e.rel)} of ${esc(e.to)}${t ? `, because of the tuple <code>${esc(FGA.formatTuple(t))}</code>` : ''}</div>`;
+      }
       if (mode === 'data') {
         const ts = e.tupleIds.map((id) => S.store && S.store.byId(id)).filter(Boolean);
         const lines = ts.map((t) => FGA.formatTuple(t)).join('\n');
@@ -942,7 +1097,7 @@
       const svgEl = svg.node();
       svgEl.classList.toggle('stepping', !!opts.stepping);
       svgEl.classList.toggle('focusing', !!opts.focus);
-      root.selectAll('.node, .edge, .cluster, .row').each(function () { this.classList.remove(...HL); });
+      root.selectAll('.node, .edge, .cluster, .row, .ilink').each(function () { this.classList.remove(...HL); });
       if (!hl) { svgEl.classList.remove('has-hl'); gEdges.selectAll('g.edge').each(function (e) { d3.select(this).select('path.main').attr('marker-end', baseMarker(e)); }); return; }
       const rank = { skip: 0, ghost: 0, read: 1, active: 2, in: 2, out: 2, fail: 3, ok: 4 };
       let any = false;
@@ -967,19 +1122,39 @@
         return;
       }
       if (mode === 'model') { paintTree(hl, rank, mark); svgEl.classList.toggle('has-hl', any); return; }
-      const nodes = hl.dataNodes;
-      const edgesHl = hl.dataEdges;
-      for (const [id, st] of Object.entries(nodes || {})) {
+      const nodes = hl.dataNodes || {};
+      const edgesHl = hl.dataEdges || {};
+      for (const [id, st] of Object.entries(nodes)) {
+        if (id.includes('#')) {
+          // a userset `object#relation` is a slot row on that object's card
+          const row = gNodes.select(`g.row[data-id="${cssEsc(id)}"]`);
+          if (!row.empty()) { mark(row.node(), st); const card = row.node().closest('g.node'); if (card) card.classList.add('hl'); }
+          continue;
+        }
         const el = gNodes.select(`g.node[data-id="${cssEsc(id)}"]`);
         if (!el.empty()) { mark(el.node(), st); touchClusters.add(el.datum().cluster); }
       }
       gEdges.selectAll('g.edge').each(function (e) {
-        let best = (edgesHl || {})[e.id] || null;
-        const keys = mode === 'data' ? e.tupleIds.map((id) => `t${id}`) : (e.gids || []);
-        for (const k of keys) { const st = (edgesHl || {})[k]; if (st && (best === null || rank[st] > rank[best])) best = st; }
+        let best = null;
+        if (e.derived) {
+          // a tuple-to-userset edge lights up with the tuple it derives from, when its slot is in play
+          const st = edgesHl[`t${e.tupleId}`];
+          if (st && (nodes[e.toSlot] || nodes[e.to] || nodes[e.fromSlot] || nodes[e.from])) best = st;
+        } else {
+          best = edgesHl[e.id] || null;
+          const keys = mode === 'data' ? e.tupleIds.map((id) => `t${id}`) : (e.gids || []);
+          for (const k of keys) { const st = edgesHl[k]; if (st && (best === null || rank[st] > rank[best])) best = st; }
+        }
         const main = d3.select(this).select('path.main');
         if (best) { mark(this, best); main.attr('marker-end', `url(#arrow-${best})`); touchClusters.add(e.from.split('#')[0].split('@')[0]); touchClusters.add(e.to.split('#')[0].split('@')[0]); }
         else main.attr('marker-end', baseMarker(e));
+      });
+      // computed links inside a card follow the model edge they stand for, on the object being resolved
+      const me = hl.modelEdges || {};
+      gNodes.selectAll('path.ilink').each(function (l) {
+        const st = me[l.gid];
+        if (st && nodes[l.object]) { this.classList.add('hl', `hl-${st}`); this.setAttribute('marker-end', `url(#arrow-s-${st})`); any = true; }
+        else this.setAttribute('marker-end', `url(#arrow-s-${l.ctx === 'exclusion' ? 'exclusion' : 'computed'})`);
       });
       touchClusters.forEach((c) => { const el = gClusters.select(`g.cluster[data-id="${cssEsc(c)}"]`); if (!el.empty()) el.node().classList.add('hl'); });
       svgEl.classList.toggle('has-hl', any);
@@ -1110,6 +1285,7 @@
       const out = [];
       const add = (id, label, m, kind, datum) => out.push({ id, label, mode: m, kind, datum, score: label.toLowerCase().startsWith(q) ? 0 : label.toLowerCase().includes(q) ? 1 : 2 });
       (graphs.data ? graphs.data.nodes : []).forEach((n) => { if (n.id.toLowerCase().includes(q)) add(n.id, n.id, 'data', n.kind === 'wildcard' ? 'wildcard' : 'object', n); });
+      if (q.includes('#') && graphs.data && modelRef) graphs.data.nodes.forEach((n) => { const t = modelRef.typeMap.get(n.type); if (!t || n.kind !== 'object') return; t.relations.forEach((r) => { const id = `${n.id}#${r.name}`; if (id.toLowerCase().includes(q)) add(id, id, 'data', 'userset', { id, object: n.id, rel: r.name }); }); });
       (graphs.model ? graphs.model.nodes : []).forEach((n) => { if (n.kind === 'rel' && n.id.toLowerCase().includes(q)) add(n.id, n.id, 'model', 'relation', n); });
       (graphs.schema ? graphs.schema.nodes : []).forEach((n) => { if (n.id.toLowerCase().includes(q)) add(n.id, `type ${n.id}`, 'schema', 'type', n); });
       const curFirst = (x) => (x.mode === mode ? 0 : 1);
@@ -1118,6 +1294,13 @@
     function jumpTo(item) {
       if (item.mode !== mode) { mode = item.mode; emit('modeChanged', mode); render(false); }
       if (mode === 'model') { setResolutionRoot(item.id); fit(true); const r = curL && curL.nodes[0]; if (r) flash([r.id]); return; }
+      if (item.kind === 'userset') {
+        if (!cardOverride.get(item.datum.object) && !(curL && curL.nodes.some((x) => x.id === item.datum.object && x.kind === 'inst'))) toggleCard(item.datum.object, true);
+        const n = curL && curL.nodes.find((x) => x.id === item.datum.object);
+        if (!n) return;
+        setFocus(n.id, n, null); panTo(n.id, true); flash([item.id]);
+        return;
+      }
       const n = curL && curL.nodes.find((x) => x.id === item.id);
       if (!n) return;
       setFocus(item.id, n, null);
@@ -1170,6 +1353,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
+      setCardsMode, setPathObjects, toggleCard, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,
