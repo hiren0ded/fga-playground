@@ -168,7 +168,8 @@
     const stage = $('#graph-stage'), tip = $('#graph-tip'), empty = $('#graph-empty');
     const mini = d3.select('#minimap');
     let curT = d3.zoomIdentity;
-    const zoom = d3.zoom().scaleExtent([0.08, 4]).clickDistance(4).on('zoom', (e) => { curT = e.transform; root.attr('transform', e.transform); updateLod(e.transform.k); updateMinimap(); });
+    let userMoved = false; // the viewer panned/zoomed since the last fresh layout: don't re-fit under them
+    const zoom = d3.zoom().scaleExtent([0.08, 4]).clickDistance(4).on('zoom', (e) => { curT = e.transform; root.attr('transform', e.transform); updateLod(e.transform.k); updateMinimap(); if (e.sourceEvent) userMoved = true; });
     svg.call(zoom).on('dblclick.zoom', null);
     const canvas = document.createElement('canvas').getContext('2d');
     const measure = (text, font) => { canvas.font = font; return canvas.measureText(text).width; };
@@ -186,6 +187,13 @@
     // proof walk: a numbered path (FGA.proofSteps) drawn over the data graph. `proofWalk` is pinned by a
     // click / a Check result; `proofPreview` follows the pointer over a derived edge.
     let proofWalk = null, proofPreview = null, proofObjects = new Set();
+    // scope of the data view on big stores: 'auto' | 'all' | 'near' (around the query) | 'grouped' (by type)
+    let scopeMode = 'auto', expandedNodes = new Set(), expandedTypes = new Set(), openBundles = new Set(), scopeInfo = null;
+    const BIG = 60, BUNDLE_MIN = 3;
+    // stable layout: last positions per view, reused when the graph changes only a little
+    const prevPos = {}; let freshNext = false;
+    // ELK (layered, port-aware, orthogonal edges) for the data view; loaded on first use
+    let elk = null, elkLoading = null, elkFailed = false, layoutVersion = 0;
     let proofOrder = 'check'; // 'check' = numbered as Check resolves (object → subject); 'flow' = subject → goal
     let proofLock = false;    // locked: clicks on the graph cannot change the selection or clear the walk
     let typeIndex = new Map(), relIndex = new Map();
@@ -216,7 +224,7 @@
       render(true);
     }
     function setMode(m) { mode = m; focus = null; hoverHl = null; render(false); }
-    function setLayout(p) { layoutPreset = p; render(true); }
+    function setLayout(p) { layoutPreset = p; freshNext = true; userMoved = false; render(true); }
     function setSubjects() { /* kept for API compatibility; the resolution view has no subject fan-out */ }
     // instance graph: 'path' = cards for the objects the current query touched, 'all', or 'none'
     function setCardsMode(m) { if (!['path', 'all', 'none'].includes(m)) m = 'path'; if (m === cardsMode) return; cardsMode = m; cardOverride.clear(); if (mode === 'data') render(true); }
@@ -257,8 +265,87 @@
         if (!key || !modelRef) return null;
         return rewriteTree(modelRef, key, treeExpanded);
       }
-      return instanceGraph(g0);
+      const vg = instanceGraph(scopeGraph(g0));
+      bundleSubjects(vg);
+      return vg;
     }
+    // ── scope: on big stores show the neighbourhood of the query, or one node per type
+    function scopeGraph(g0) {
+      const total = g0.nodes.length;
+      const seeds = new Set();
+      const has = new Set(g0.nodes.map((n) => n.id));
+      const addSeed = (id) => { if (!id) return; const o = id.split('#')[0]; if (has.has(o)) seeds.add(o); };
+      pathObjects.forEach(addSeed); proofObjects.forEach(addSeed); expandedNodes.forEach(addSeed);
+      if (proofWalk) proofWalk.steps.forEach((st) => { addSeed(st.from); addSeed(st.to); });
+      if (focus) focus.nodes.forEach(addSeed);
+      const eff = scopeMode === 'auto' ? (total <= BIG ? 'all' : seeds.size ? 'near' : 'grouped') : scopeMode === 'near' && !seeds.size ? 'grouped' : scopeMode;
+      scopeInfo = { mode: scopeMode, eff, total, shown: total };
+      if (eff === 'all') return g0;
+      if (eff === 'near') {
+        const adj = new Map();
+        const link = (a, b) => { (adj.get(a) || adj.set(a, new Set()).get(a)).add(b); };
+        g0.edges.forEach((e) => { link(e.from, e.to); link(e.to, e.from); });
+        const keep = new Set(seeds);
+        let frontier = Array.from(seeds);
+        for (let d = 0; d < 2; d++) { const next = []; frontier.forEach((v) => (adj.get(v) || []).forEach((w) => { if (!keep.has(w)) { keep.add(w); next.push(w); } })); frontier = next; }
+        expandedNodes.forEach((v) => (adj.get(v) || []).forEach((w) => keep.add(w)));
+        const nodes = g0.nodes.filter((n) => keep.has(n.id)).map((n) => { const more = Array.from(adj.get(n.id) || []).filter((w) => !keep.has(w)).length; return more ? Object.assign({}, n, { more }) : n; });
+        scopeInfo.shown = nodes.length;
+        return { nodes, edges: g0.edges.filter((e) => keep.has(e.from) && keep.has(e.to)) };
+      }
+      // grouped: one node per type unless the type is small, expanded, or holds a seed
+      const byType = new Map();
+      g0.nodes.forEach((n) => { (byType.get(n.type) || byType.set(n.type, []).get(n.type)).push(n); });
+      const groupOf = new Map();
+      const nodes = [];
+      byType.forEach((list, type) => {
+        if (list.length <= 3 || expandedTypes.has(type)) { nodes.push(...list); return; }
+        const gid = `grp:${type}`;
+        const kept = list.filter((n) => seeds.has(n.id));
+        nodes.push(...kept);
+        const rest = list.filter((n) => !seeds.has(n.id));
+        rest.forEach((n) => groupOf.set(n.id, gid));
+        nodes.push({ id: gid, type, kind: 'group', label: `${type} ×${rest.length}`, members: rest.map((n) => n.id), tuples: [].concat(...rest.map((n) => n.tuples || [])) });
+      });
+      const map = (id) => groupOf.get(id) || id;
+      const edges = g0.edges.map((e) => Object.assign({}, e, { from: map(e.from), to: map(e.to), userset: groupOf.has(e.from) ? null : e.userset })).filter((e) => e.from !== e.to);
+      scopeInfo.shown = nodes.length;
+      return { nodes, edges };
+    }
+    // ── bundling: plain subjects of one type whose only edge goes to the same place become one node
+    function bundleSubjects(vg) {
+      if (!vg) return;
+      const protect = new Set();
+      Object.keys((currentHl && currentHl.dataNodes) || {}).forEach((k) => protect.add(k.split('#')[0]));
+      if (proofWalk) proofWalk.steps.forEach((st) => { if (st.from) protect.add(st.from.split('#')[0]); });
+      if (focus) focus.nodes.forEach((id) => protect.add(id));
+      Object.keys(pinned.data || {}).forEach((id) => protect.add(id));
+      const deg = new Map();
+      vg.edges.forEach((e) => { deg.set(e.from, (deg.get(e.from) || 0) + 1); deg.set(e.to, (deg.get(e.to) || 0) + 1); });
+      const byId = new Map(vg.nodes.map((n) => [n.id, n]));
+      const groups = new Map();
+      vg.edges.forEach((e) => {
+        const n = byId.get(e.from);
+        if (!n || n.kind !== 'object' || n.expandable || e.kind !== 'tuple' || e.fromSlot || deg.get(n.id) !== 1 || protect.has(n.id)) return;
+        const key = `${n.type}|${e.toSlot || e.to}|${e.rels.join(',')}${e.conditions.length ? '|c' : ''}`;
+        if (openBundles.has(key)) return;
+        (groups.get(key) || groups.set(key, []).get(key)).push(e);
+      });
+      groups.forEach((list, key) => {
+        if (list.length < BUNDLE_MIN) return;
+        const members = list.map((e) => e.from), first = list[0], type = byId.get(first.from).type;
+        const bid = `bnd:${key}`;
+        const drop = new Set(members);
+        vg.nodes = vg.nodes.filter((n) => !drop.has(n.id));
+        vg.nodes.push({ id: bid, kind: 'bundle', type, key, members, label: `${members.length} ${type}s`, tuples: [].concat(...members.map((m) => (byId.get(m).tuples || []))) });
+        vg.edges = vg.edges.filter((e) => !list.includes(e));
+        vg.edges.push(Object.assign({}, first, { id: `bnd-e:${key}`, from: bid, tupleIds: [].concat(...list.map((e) => e.tupleIds)), bundled: members.length, label: first.label, labels: first.labels }));
+      });
+    }
+    function setScope(m) { if (!['auto', 'all', 'near', 'grouped'].includes(m)) m = 'auto'; scopeMode = m; expandedNodes.clear(); expandedTypes.clear(); freshNext = true; if (mode === 'data') render(true); }
+    function expandNode(id) { expandedNodes.add(id); if (mode === 'data') render(true); }
+    function expandGroup(type) { expandedTypes.add(type); if (mode === 'data') render(true); }
+    function openBundle(key) { openBundles.add(key); if (mode === 'data') render(true); }
     // ── instance graph (data view)
     // OpenFGA reasons about usersets — `doc:roadmap#viewer`, not `doc:roadmap` — so an object whose type has
     // relations can open as a card with one slot per relation. Tuples then point at the slot they grant,
@@ -400,7 +487,9 @@
         n.width = w; n.height = HDR + 8 + n.rows.length * ROW + 6;
         return;
       }
-      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0) + (n.expandable ? 18 : 0);
+      if (n.kind === 'group' || n.kind === 'bundle') { n.width = Math.ceil(measure(n.label, MONO)) + 50; n.height = 34; return; }
+      n.moreW = n.more ? Math.ceil(measure(`+${n.more}`, MONO_S)) + 14 : 0;
+      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0) + (n.expandable ? 18 : 0) + (n.moreW ? n.moreW + 6 : 0);
       n.height = 30;
     }
     // y of a slot row's centre, relative to the card's top edge
@@ -572,9 +661,158 @@
       else if (mode === 'model') L = layoutDagre(vg, 'TB');
       else if (mode === 'data' && vg.nodes.some((n) => n.kind === 'inst')) L = layoutDagre(vg, 'LR');
       else L = bestOf((dir) => layoutDagre(vg, dir));
+      stabilize(L);
       applyPins(L);
       computeClusters(L);
       return L;
+    }
+    // keep the picture still when the graph changes only a little: nodes that were already on screen
+    // stay put, new ones arrive where the fresh layout puts them (shifted into the old frame), nudged
+    // clear of anything they would overlap. A bigger change, a resized node or "Tidy" lays out afresh.
+    function viewKey() { return [mode, layoutPreset, scopeInfo ? scopeInfo.eff : '', cardsMode].join('|'); }
+    function stabilize(L) {
+      L.stabilized = false;
+      const prev = prevPos[mode];
+      if (freshNext || !prev || prev.key !== viewKey()) { freshNext = false; return; }
+      const kept = L.nodes.filter((n) => prev.pos.has(n.id)), added = L.nodes.filter((n) => !prev.pos.has(n.id));
+      const removed = prev.pos.size - kept.length;
+      if (kept.length < 2 || added.length + removed > Math.max(4, L.nodes.length * 0.25)) return;
+      if (kept.some((n) => { const p = prev.pos.get(n.id); return Math.abs(p.w - n.width) > 24 || Math.abs(p.h - n.height) > 10; })) return;
+      let dx = 0, dy = 0;
+      kept.forEach((n) => { const p = prev.pos.get(n.id); dx += p.x - n.x; dy += p.y - n.y; });
+      dx /= kept.length; dy /= kept.length;
+      kept.forEach((n) => { const p = prev.pos.get(n.id); n.x = p.x; n.y = p.y; });
+      const placed = kept.slice();
+      const hit = (a, b) => Math.abs(a.x - b.x) < (a.width + b.width) / 2 + 16 && Math.abs(a.y - b.y) < (a.height + b.height) / 2 + 12;
+      added.forEach((n) => {
+        n.x += dx; n.y += dy;
+        let guard = 0, o;
+        while ((o = placed.find((m) => hit(n, m))) && guard++ < 60) n.y = o.y + (o.height + n.height) / 2 + 14;
+        placed.push(n);
+      });
+      // edges between nodes that stayed keep their previous route; the rest are redrawn as curves
+      const stayed = new Set(kept.map((n) => n.id));
+      L.edges.forEach((e) => {
+        const pe = prev.edges && prev.edges.get(e.id);
+        if (pe && stayed.has(e.from) && stayed.has(e.to)) { e.points = pe.points; e.elk = pe.elk; e.lx = pe.lx; e.ly = pe.ly; }
+        else { e.points = null; e.lx = undefined; e.ly = undefined; e.elk = false; }
+      });
+      L.stabilized = true;
+    }
+    function rememberPositions(L) { if (!L) return; prevPos[mode] = { key: viewKey(), pos: new Map(L.nodes.map((n) => [n.id, { x: n.x, y: n.y, w: n.width, h: n.height }])), edges: new Map(L.edges.map((e) => [e.id, { points: e.points ? e.points.map((p) => ({ x: p.x, y: p.y })) : null, elk: !!e.elk, lx: e.lx, ly: e.ly }])) }; }
+    function tidy() { freshNext = true; pinned[mode] = {}; emit('positions', pinned); userMoved = false; render(true); }
+    // ── ELK
+    function loadElk() {
+      if (elk) return Promise.resolve(elk);
+      if (elkFailed) return Promise.reject(new Error('elk unavailable'));
+      const url = window.__FGA_ASSETS && window.__FGA_ASSETS.elk;
+      if (!url) { elkFailed = true; return Promise.reject(new Error('elk not bundled')); }
+      if (!elkLoading) elkLoading = new Promise((resolve, reject) => {
+        const sc = document.createElement('script'); sc.src = url; sc.async = true;
+        sc.onload = () => { try { elk = new window.ELK(); resolve(elk); } catch (e) { elkFailed = true; reject(e); } };
+        sc.onerror = () => { elkFailed = true; reject(new Error('could not load elk')); };
+        document.head.appendChild(sc);
+      });
+      return elkLoading;
+    }
+    const useElk = () => mode === 'data' && layoutPreset === 'auto' && !elkFailed;
+    function elkLayout(L, version) {
+      const nodes = L.nodes, edges = L.edges.filter((e) => e.from !== e.to);
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const graph = {
+        id: 'root',
+        layoutOptions: {
+          'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '72', 'elk.spacing.nodeNode': '22', 'elk.spacing.edgeNode': '14', 'elk.spacing.edgeEdge': '9',
+          'elk.layered.spacing.edgeNodeBetweenLayers': '16', 'elk.layered.spacing.edgeEdgeBetweenLayers': '9',
+          'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', 'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+          'elk.edgeLabels.placement': 'CENTER', 'elk.layered.edgeLabels.sideSelection': 'SMART_DOWN', 'elk.separateConnectedComponents': 'true', 'elk.spacing.componentComponent': '40',
+        },
+        children: nodes.map((n) => {
+          const c = { id: n.id, width: n.width, height: n.height };
+          if (n.kind === 'inst') {
+            c.layoutOptions = { 'elk.portConstraints': 'FIXED_POS' };
+            c.ports = [].concat(...n.rows.map((r, i) => [
+              { id: `${r.id}::in`, x: -1, y: rowCentre(i) - 1, width: 2, height: 2, layoutOptions: { 'elk.port.side': 'WEST' } },
+              { id: `${r.id}::out`, x: n.width - 1, y: rowCentre(i) - 1, width: 2, height: 2, layoutOptions: { 'elk.port.side': 'EAST' } },
+            ]));
+          }
+          return c;
+        }),
+        edges: edges.map((e, i) => {
+          const fromN = byId.get(e.from), toN = byId.get(e.to);
+          const src = e.fromSlot && fromN && fromN.kind === 'inst' && fromN.rows.some((r) => r.id === e.fromSlot) ? `${e.fromSlot}::out` : e.from;
+          const dst = e.toSlot && toN && toN.kind === 'inst' && toN.rows.some((r) => r.id === e.toSlot) ? `${e.toSlot}::in` : e.to;
+          const w = e.text ? Math.ceil(measure(e.text, MONO_S) * 0.92) + 12 : 0;
+          return { id: `x${i}`, sources: [src], targets: [dst], labels: w ? [{ id: `x${i}l`, text: e.text, width: w, height: 18 }] : [] };
+        }),
+      };
+      return elk.layout(graph).then((res) => {
+        if (version !== layoutVersion || curL !== L || mode !== 'data') return;
+        const pos = new Map(res.children.map((c) => [c.id, c]));
+        L.nodes.forEach((n) => { const c = pos.get(n.id); if (c) { n.x = c.x + n.width / 2; n.y = c.y + n.height / 2; } });
+        res.edges.forEach((re, i) => {
+          const e = edges[i]; const sec = re.sections && re.sections[0];
+          if (!sec) return;
+          e.points = [sec.startPoint].concat(sec.bendPoints || [], [sec.endPoint]).map((p) => ({ x: p.x, y: p.y }));
+          e.elk = true;
+          const lb = re.labels && re.labels[0];
+          if (lb && lb.x != null) { e.lx = lb.x + lb.width / 2; e.ly = lb.y + lb.height / 2; } else { e.lx = undefined; e.ly = undefined; }
+        });
+        applyPins(L);
+        bounds = boundsOf(L);
+        draw(L, true);
+        rememberPositions(L);
+        if (!userMoved) fit(true);
+        afterRender();
+      }).catch(() => { /* keep the dagre layout */ });
+    }
+    function roundedPath(pts, r = 7) {
+      if (pts.length < 3) return `M${pts[0].x},${pts[0].y} L${pts[pts.length - 1].x},${pts[pts.length - 1].y}`;
+      let d = `M${pts[0].x},${pts[0].y}`;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+        const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+        const k = Math.min(r, l1 / 2, l2 / 2);
+        const p1 = { x: b.x - ((b.x - a.x) / (l1 || 1)) * k, y: b.y - ((b.y - a.y) / (l1 || 1)) * k };
+        const p2 = { x: b.x + ((c.x - b.x) / (l2 || 1)) * k, y: b.y + ((c.y - b.y) / (l2 || 1)) * k };
+        d += ` L${p1.x},${p1.y} Q${b.x},${b.y} ${p2.x},${p2.y}`;
+      }
+      const z = pts[pts.length - 1];
+      return d + ` L${z.x},${z.y}`;
+    }
+    function polyMid(pts) {
+      let total = 0; for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      let half = total / 2;
+      for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); if (half <= l) { const t = l ? half / l : 0; return { x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t, y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t }; } half -= l; }
+      return pts[0];
+    }
+    // ── labels: the most important win, the rest move along their edge or hide until hovered
+    function declutterLabels() {
+      if (!curL || mode === 'model' || mode === 'matrix') return;
+      const rects = curL.nodes.map((n) => ({ x0: n.x - n.width / 2, y0: n.y - n.height / 2, x1: n.x + n.width / 2, y1: n.y + n.height / 2 }));
+      const over = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+      const items = [];
+      gEdges.selectAll('g.edge').each(function (e) {
+        const lbl = this.querySelector('g.lbl'); if (!lbl) return;
+        lbl.classList.remove('lbl-off'); lbl.removeAttribute('transform');
+        if (!e.text || !e.mid) return;
+        const cl = this.classList;
+        const prio = cl.contains('hover') ? 5 : cl.contains('hl-ok') || cl.contains('hl-active') || cl.contains('hl-fail') ? 4 : cl.contains('hl') ? 3 : e.access ? 0 : 1;
+        items.push({ el: this, lbl, e, prio, w: measure(e.text, MONO_S) * 0.92 + 12 });
+      });
+      items.sort((a, b) => b.prio - a.prio || a.w - b.w);
+      const placed = [];
+      items.forEach((it) => {
+        const path = it.el.querySelector('path.main');
+        let total = 0; try { total = path.getTotalLength(); } catch (err) { total = 0; }
+        const cands = [it.e.mid];
+        if (total > 40) [0.35, 0.65, 0.22, 0.78].forEach((t) => { try { const p = path.getPointAtLength(total * t); cands.push({ x: p.x, y: p.y }); } catch (err) { /* ignore */ } });
+        const ok = cands.find((c) => { const r = { x0: c.x - it.w / 2, y0: c.y - 9, x1: c.x + it.w / 2, y1: c.y + 9 }; return !placed.some((p) => over(r, p)) && !rects.some((p) => over(r, p)); });
+        if (!ok) { it.lbl.classList.add('lbl-off'); return; }
+        if (ok !== it.e.mid) it.lbl.setAttribute('transform', `translate(${ok.x - it.e.mid.x},${ok.y - it.e.mid.y})`);
+        placed.push({ x0: ok.x - it.w / 2, y0: ok.y - 9, x1: ok.x + it.w / 2, y1: ok.y + 9 });
+      });
     }
     function applyPins(L) {
       const pins = pinned[mode] || {};
@@ -628,6 +866,7 @@
         const x = a.x + a.width / 2 - 10, y = a.y - a.height / 2;
         return { d: `M${x - 14},${y} C${x - 14},${y - 30} ${x + 26},${y - 30} ${x + 10},${y - 2}`, mid: { x: a.x + a.width / 2, y: y - 24 } };
       }
+      if (e.elk && e.points && e.points.length >= 2) return { d: roundedPath(e.points), mid: e.lx != null ? { x: e.lx, y: e.ly } : polyMid(e.points) };
       if (mode === 'data' && (e.fromSlot || e.toSlot)) {
         // slot edges leave and enter cards at the row they concern
         const pb0 = e.toSlot && b.kind === 'inst' ? slotPoint(b, e.toSlot, a.x) : null;
@@ -678,8 +917,10 @@
       }
       empty.hidden = true;
       lastStage = { w: stage.clientWidth, h: stage.clientHeight };
+      const fresh = !prevPos[mode] || freshNext || prevPos[mode].key !== viewKey();
       const L = runLayout(vg);
       curL = L;
+      layoutVersion++;
       bounds = boundsOf(L);
       if (mode === 'data') {
         Array.from(new Set(L.edges.map((e) => e.rel))).forEach((r) => {
@@ -691,10 +932,23 @@
         });
       }
       draw(L, animate && lastMode === mode);
+      const modeChanged = lastMode !== mode;
       lastMode = mode;
       renderProofBar();
-      fit(false);
+      renderScopePill();
+      if (!L.stabilized || modeChanged || !userMoved) { fit(false); userMoved = false; }
+      rememberPositions(L);
       afterRender();
+      if (!L.stabilized && useElk() && (fresh || L.nodes.length > 1)) loadElk().then(() => elkLayout(L, layoutVersion)).catch(() => {});
+    }
+    // scope pill: how much of a big store is on screen, and how to see more
+    function renderScopePill() {
+      const el = $('#scope-pill'); if (!el) return;
+      if (mode !== 'data' || !scopeInfo || (scopeInfo.eff === 'all' && scopeInfo.total <= BIG && scopeMode === 'auto')) { el.hidden = true; return; }
+      el.hidden = false;
+      const what = scopeInfo.eff === 'near' ? 'near the query' : scopeInfo.eff === 'grouped' ? 'grouped by type' : 'everything';
+      el.innerHTML = `<span>${scopeInfo.eff === 'all' ? `all ${scopeInfo.total} nodes` : `${scopeInfo.shown} of ${scopeInfo.total} nodes · ${what}`}</span>${scopeInfo.eff !== 'all' ? '<button class="btn xs ghost" data-s="all">show all</button>' : ''}${scopeInfo.eff !== 'near' ? '<button class="btn xs ghost" data-s="near">near the query</button>' : ''}${scopeInfo.eff !== 'grouped' ? '<button class="btn xs ghost" data-s="grouped">group by type</button>' : ''}`;
+      $$('button[data-s]', el).forEach((b) => b.addEventListener('click', () => { setScope(b.dataset.s); emit('scope', scopeMode); }));
     }
     let lastMode = null;
     function draw(L, animate) {
@@ -800,6 +1054,17 @@
       sel.append('text').attr('x', n.width / 2).attr('y', n.height / 2 + 4).attr('text-anchor', 'middle').text(n.label); // direct / ttu
     }
     function drawNode(sel, n) {
+      if (n.kind === 'group' || n.kind === 'bundle') {
+        sel.append('rect').attr('width', n.width).attr('height', n.height).attr('rx', 9);
+        if (n.kind === 'bundle') { sel.append('rect').attr('class', 'stack').attr('x', 3).attr('y', -3).attr('width', n.width - 6).attr('height', 4).attr('rx', 2); }
+        sel.append('text').attr('x', 12).attr('y', n.height / 2 + 4).text(n.label);
+        const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 22},${n.height / 2 - 7})`).style('cursor', 'pointer');
+        tog.append('rect').attr('width', 14).attr('height', 14).attr('rx', 3);
+        tog.append('text').attr('x', 7).attr('y', 10.5).attr('text-anchor', 'middle').text('+');
+        tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; if (n.kind === 'group') expandGroup(n.type); else openBundle(n.key); })
+          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">${n.kind === 'group' ? `show the ${n.members.length} ${esc(n.type)} objects individually` : `show these ${n.members.length} ${esc(n.type)}s individually`}</div>`); });
+        return;
+      }
       sel.append('rect').attr('width', n.width).attr('height', n.height).attr('rx', n.kind === 'type' ? 14 : 7);
       if (n.badge) { sel.append('rect').attr('class', 'badge-bg').attr('x', 6).attr('y', 5).attr('width', n.badgeW).attr('height', 16).attr('rx', 4); sel.append('text').attr('class', 'badge').attr('x', 11).attr('y', 16.5).text(n.badge); }
       const label = n.kind === 'wildcard' ? `✶ ${n.label}` : n.collapsedCount ? `${n.label}  ${n.collapsedCount} relations` : n.label;
@@ -812,6 +1077,15 @@
         tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('+');
         tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; toggleCard(n.id, true); })
           .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">open ${esc(n.id)} as a card: one slot per relation, tuples pointing at the slot they grant</div>`); });
+      }
+      if (n.more) {
+        sel.select('text').attr('x', (n.width - n.moreW - 6 - (n.expandable ? 18 : 0)) / 2);
+        const mx = n.width - n.moreW - 4 - (n.expandable ? 20 : 0);
+        const mg = sel.append('g').attr('class', 'more').attr('transform', `translate(${mx},${n.height / 2 - 8})`).style('cursor', 'pointer');
+        mg.append('rect').attr('width', n.moreW).attr('height', 16).attr('rx', 8);
+        mg.append('text').attr('x', n.moreW / 2).attr('y', 11.5).attr('text-anchor', 'middle').text(`+${n.more}`);
+        mg.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; expandNode(n.id); })
+          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">${n.more} more connection${n.more === 1 ? '' : 's'} not on screen — click to show them</div>`); });
       }
       if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
     }
@@ -903,7 +1177,7 @@
           n.x = ev.x; n.y = ev.y; n.pinned = true;
           d3.select(this).attr('transform', `translate(${n.x - n.width / 2},${n.y - n.height / 2})`);
           const byId = new Map(curL.nodes.map((m) => [m.id, m]));
-          incident.forEach((e) => { e.points = null; const geo = edgePath(e, byId); e.mid = geo.mid; const sel = gEdges.select(`g.edge[data-id="${cssEsc(e.id)}"]`); sel.select('path.hit').attr('d', geo.d); sel.select('path.main').attr('d', geo.d); drawEdgeLabel(sel.select('g.lbl'), e, 0); });
+          incident.forEach((e) => { e.points = null; e.elk = false; const geo = edgePath(e, byId); e.mid = geo.mid; const sel = gEdges.select(`g.edge[data-id="${cssEsc(e.id)}"]`); sel.select('path.hit').attr('d', geo.d); sel.select('path.main').attr('d', geo.d); drawEdgeLabel(sel.select('g.lbl'), e, 0); });
           if (proofWalk || proofPreview) placeBadges();
           if (mode === 'model') { computeClusters(curL); gClusters.selectAll('g.cluster').each(function (c) { const s = d3.select(this); s.select('rect:not(.hdr-hit)').attr('x', c.x - c.width / 2).attr('y', c.y - c.height / 2).attr('width', c.width).attr('height', c.height); s.select('text').attr('x', c.x - c.width / 2 + 10).attr('y', c.y - c.height / 2 + 14); s.select('rect.hdr-hit').attr('x', c.x - c.width / 2).attr('y', c.y - c.height / 2).attr('width', c.width); }); }
         })
@@ -923,6 +1197,7 @@
           d3.select(this).classed('dragging', false);
           if (Math.hypot(n.x - start.x, n.y - start.y) < 2) { n.x = start.x; n.y = start.y; return; }
           pinned[mode][n.id] = { x: Math.round(n.x), y: Math.round(n.y) };
+          rememberPositions(curL);
           d3.select(this).classed('pinned', true);
           if (!d3.select(this).select('circle.pin').size()) d3.select(this).append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
           bounds = boundsOf(curL);
@@ -943,6 +1218,8 @@
       return `<div class="sub">out ${outs.length}${outs.length ? ' (' + esc(fmt(outs)) + ')' : ''} · in ${ins.length}${ins.length ? ' (' + esc(fmt(ins)) + ')' : ''}</div><div class="sub">reaches ${reachOut} node${reachOut === 1 ? '' : 's'} · reached by ${reachIn}</div>`;
     }
     function tipForNode(n) {
+      if (n.kind === 'group') return `<code>${esc(n.label)}</code><div class="sub">${n.members.length} ${esc(n.type)} objects shown as one node to keep a big store readable</div><code>${esc(n.members.slice(0, 8).join('\n'))}${n.members.length > 8 ? '\n…' : ''}</code><div class="sub">+ shows them individually · “show all” above the graph shows everything</div>`;
+      if (n.kind === 'bundle') return `<code>${esc(n.label)}</code><div class="sub">${n.members.length} ${esc(n.type)}s with the same single tuple, bundled into one edge</div><code>${esc(n.members.slice(0, 10).join('\n'))}${n.members.length > 10 ? '\n…' : ''}</code><div class="sub">+ shows them individually</div>`;
       if (mode === 'model') {
         if (n.kind === 'rel') {
           const how = n.via === 'computed' ? `holding <b>${esc(n.rel)}</b> on the same object implies the parent relation` : n.via === 'ttu' ? `checked on each parent object reached through the tupleset` : n.via === 'userset' ? `anyone who is <b>${esc(n.rel)}</b> of a <b>${esc(n.type)}</b> named in a tuple` : 'the relation being resolved';
@@ -1212,6 +1489,11 @@
         const el = gNodes.select(`g.node[data-id="${cssEsc(id)}"]`);
         if (!el.empty()) { mark(el.node(), st); touchClusters.add(el.datum().cluster); }
       }
+      // bundles and type groups light up when any member does
+      gNodes.selectAll('g.node.bundle, g.node.group').each(function (d) {
+        let best = null; (d.members || []).forEach((m) => { const v = nodes[m]; if (v && (!best || rank[v] > rank[best])) best = v; });
+        if (best) mark(this, best);
+      });
       gEdges.selectAll('g.edge').each(function (e) {
         let best = null;
         if (e.access) {
@@ -1305,6 +1587,7 @@
       applyVisual();
       updateMinimap();
       updateLod(curT.k);
+      declutterLabels();
     }
 
     // ── proof walk
@@ -1377,7 +1660,8 @@
       proofLock = false; svg.node().classList.remove('locked');
       proofWalk = null; proofPreview = null; proofObjects = new Set();
       focus = null; hoverHl = null; currentHl = null; lastOpts = {};
-      cardOverride.clear();
+      cardOverride.clear(); expandedNodes.clear(); openBundles.clear(); expandedTypes.clear();
+      freshNext = true; userMoved = false;
       gBadges.selectAll('*').remove();
       emit('reset');
       render(true);
@@ -1555,6 +1839,14 @@
     }
     function jumpTo(item) {
       if (item.mode !== mode) { mode = item.mode; emit('modeChanged', mode); render(false); }
+      if (mode === 'data') {
+        const target = item.kind === 'userset' ? item.datum.object : item.id;
+        if (curL && !curL.nodes.some((x) => x.id === target)) {
+          expandedNodes.add(target); expandedTypes.add(String(target).split(':')[0]);
+          Array.from(openBundles); curVG && curVG.nodes.filter((x) => x.kind === 'bundle' && x.members.includes(target)).forEach((b) => openBundles.add(b.key));
+          render(true);
+        }
+      }
       if (mode === 'model') { setResolutionRoot(item.id); fit(true); const r = curL && curL.nodes[0]; if (r) flash([r.id]); return; }
       if (item.kind === 'userset') {
         if (!cardOverride.get(item.datum.object) && !(curL && curL.nodes.some((x) => x.id === item.datum.object && x.kind === 'inst'))) toggleCard(item.datum.object, true);
@@ -1615,7 +1907,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, resetView, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

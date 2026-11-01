@@ -85,6 +85,7 @@ ${body}</body>
       const files = {
         'd3.js': fs.readFileSync(path.join(__dirname, 'node_modules/d3/dist/d3.min.js'), 'utf8'),
         'dagre.js': fs.readFileSync(path.join(__dirname, 'node_modules/dagre/dist/dagre.min.js'), 'utf8'),
+        'elk.js': fs.readFileSync(path.join(__dirname, 'node_modules/elkjs/lib/elk.bundled.js'), 'utf8'),
         'site.css': cssOut(fontsCss + src('site/site.css')),
         'engine.js': await js(src('engine.js')),
         'examples.js': await js(src('examples.js')),
@@ -121,7 +122,7 @@ ${body}</body>
         .replace('<meta name="claude:viewport-fit-sides" content="cover">\n', '')
         .replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>\n?/, '')
         .replace('<title>OpenFGA Visual Playground</title>', '<title>Playground — FGA Explorer</title>')
-        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/d3@[^"]+"><\/script>/, () => `<script src="/${named['d3.js']}"></script>`)
+        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/d3@[^"]+"><\/script>/, () => `<script>window.__FGA_ASSETS = { elk: '/${named['elk.js']}' };</script>\n<script src="/${named['d3.js']}"></script>`)
         .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/dagre@[^"]+"><\/script>/, () => `<script src="/${named['dagre.js']}"></script>`)
         .replace(/<style>\n\/\*__STYLES__\*\/\n<\/style>/, `<link rel="stylesheet" href="/${named['styles.css']}">`)
         .replace(/<script>\n\/\*__ENGINE__\*\/\n<\/script>\n<script>\n\/\*__EXAMPLES__\*\/\n<\/script>\n<script>[\s\S]*<\/script>/,

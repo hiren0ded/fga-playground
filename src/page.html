@@ -157,7 +157,15 @@
                 <button data-l="force" aria-pressed="false" title="Data view: force-directed">Force</button>
                 <button data-l="radial" aria-pressed="false" title="Rings around the focused node">Radial</button>
               </div>
+              <button class="menu-item" id="gm-tidy" title="Lay the whole graph out afresh (nodes otherwise stay where they are while you edit)">Tidy layout</button>
               <button class="menu-item" id="gm-reset" title="Forget dragged positions in this view">Reset moved nodes</button>
+              <div class="menu-title">Data view shows</div>
+              <div class="seg xs" id="scope-seg">
+                <button data-s="auto" aria-pressed="true" title="Everything on small stores; on big ones the neighbourhood of the query, or one node per type">Auto</button>
+                <button data-s="all" aria-pressed="false">All</button>
+                <button data-s="near" aria-pressed="false" title="Two hops around the query; +N on a node shows more">Near</button>
+                <button data-s="grouped" aria-pressed="false" title="One node per type; + expands a type">By type</button>
+              </div>
               <button class="menu-item" id="gm-minimap">Toggle minimap</button>
               <div class="menu-title">Export</div>
               <button class="menu-item" id="gm-svg">Copy as SVG</button>
@@ -178,6 +186,7 @@
         <svg class="minimap" id="minimap" hidden aria-hidden="true"></svg>
         <div class="tt-banner" id="tt-banner" hidden></div>
         <div class="share-banner" id="share-banner" hidden></div>
+        <div class="scope-pill" id="scope-pill" hidden></div>
         <svg id="graph-svg" role="img" aria-label="Authorization graph"></svg>
         <div class="graph-tip" id="graph-tip" hidden></div>
         <div class="graph-empty" id="graph-empty" hidden></div>

@@ -1024,3 +1024,16 @@ details.pt-more > summary:hover { color: var(--fg); }
 .g-table th { color: var(--fg-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .g-table td:first-child { color: var(--fg); font-weight: 600; white-space: nowrap; }
 .g-table td { color: var(--fg-2); }
+
+/* ── big graphs: scope pill, type groups, bundles, +N, label declutter */
+.scope-pill { position: absolute; left: 10px; bottom: 10px; z-index: 4; display: flex; gap: 6px; align-items: center; padding: 4px 6px 4px 12px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line-2); font-size: 12px; color: var(--fg-2); box-shadow: var(--shadow); }
+.graph-stage:has(#proof-bar:not([hidden])) .scope-pill { display: none; }
+.node.group rect:first-child { fill: color-mix(in srgb, var(--c) 14%, var(--surface)); stroke: var(--c); stroke-dasharray: 5 3; stroke-width: 1.4; }
+.node.bundle rect:first-child { fill: color-mix(in srgb, var(--c) 10%, var(--surface)); stroke: color-mix(in srgb, var(--c) 70%, var(--line-2)); }
+.node.bundle rect.stack { fill: color-mix(in srgb, var(--c) 30%, var(--surface)); stroke: none; }
+.node .more rect { fill: var(--surface-2); stroke: var(--line-2); }
+.node .more text { font-size: 10.5px; fill: var(--fg-2); }
+.node .more:hover rect { stroke: var(--accent); }
+.edge .lbl { transition: opacity 0.15s; }
+.edge .lbl.lbl-off { opacity: 0; pointer-events: none; }
+.edge.hover .lbl.lbl-off { opacity: 1; }

@@ -1630,6 +1630,10 @@ user:* viewer document:readme
   document.addEventListener('click', (ev) => { if (!gmenu.hidden && !ev.target.closest('.menu-wrap')) { gmenu.hidden = true; $('#btn-gmenu').setAttribute('aria-expanded', 'false'); } });
   $$('#layout-seg button').forEach((b) => b.addEventListener('click', () => { S.ui.layout = b.dataset.l; Graph.setLayout(b.dataset.l); syncGraphToolbar(); persist(); }));
   $('#gm-reset').addEventListener('click', () => { Graph.resetLayout(); toast('Moved nodes reset for this view'); });
+  $('#gm-tidy').addEventListener('click', () => { Graph.tidy(); gmenu.hidden = true; });
+  const syncScopeSeg = () => $$('#scope-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.s === Graph.scope)));
+  $$('#scope-seg button').forEach((b) => b.addEventListener('click', () => { S.ui.scope = b.dataset.s; Graph.setScope(b.dataset.s); syncScopeSeg(); persist(); }));
+  Graph.on('scope', (m) => { S.ui.scope = m; syncScopeSeg(); persist(); });
   $('#gm-minimap').addEventListener('click', () => Graph.toggleMinimap());
   $('#gm-svg').addEventListener('click', () => copyText(Graph.svgMarkup(), 'SVG'));
   $('#gm-png').addEventListener('click', async () => {
@@ -2065,6 +2069,7 @@ user:* viewer document:readme
     Graph.setSubjects(!!S.ui.subjectEdges); $('#btn-subjects').setAttribute('aria-pressed', String(!!S.ui.subjectEdges));
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
     if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
+    if (S.ui.scope) { Graph.setScope(S.ui.scope); $$('#scope-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.s === S.ui.scope))); }
     if (S.ui.proofOrder) Graph.setProofOrder(S.ui.proofOrder);
     // older versions could create stores with the same name (an example and a shared copy of it)
     const seenNames = new Set();

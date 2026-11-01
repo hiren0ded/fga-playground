@@ -98,3 +98,18 @@ serves them at `/`, `/learning`, `/legal`, `/playground` (`cleanUrls`); `/home` 
 redirect. Old share links (`/#s=…`) forward to `/playground#s=…`. `/playground?example=<id>&view=<schema|model|data|matrix>`
 opens an example store in a given view. No third-party requests: fonts and libraries are served
 from the site itself. Static page sources live in `src/site/`.
+
+## Graph layout
+
+- **Data view:** ELK's layered algorithm (elkjs, loaded on first use) with card rows as fixed
+  ports and orthogonal edge routing; dagre elsewhere and as the fallback. → / ↓ force dagre.
+- **Stable layout:** small edits keep existing nodes (and their edge routes) where they were; new
+  nodes are placed by the fresh layout, shifted into the old frame and nudged clear of overlaps.
+  *Tidy layout* (⋯ menu) and *Reset* lay out afresh.
+- **Big stores** (over 60 nodes): the data view shows the query's neighbourhood (two hops, `+N`
+  handles to expand) or, without a query, one node per type (`+` expands). *Data view shows* in the
+  ⋯ menu and the pill at the bottom switch between auto / all / near / by type.
+- **Bundling:** three or more subjects of one type whose only tuple points at the same slot become
+  one "N users" node; `+` opens it.
+- **Labels** are placed by priority (hovered, highlighted, then the rest), moved along their edge if
+  they collide, and hidden until hover if there is no room.
