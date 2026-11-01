@@ -465,6 +465,7 @@ pre.code { margin: 0; padding: 10px 12px; background: var(--surface); border: 1p
   transition: bottom 0.2s; }
 .app.focus-graph ~ .toast { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 .toast { transform: translateX(-50%); background: var(--surface); color: var(--fg); border: 1px solid var(--line-2); border-radius: 999px; padding: 8px 14px; font-size: 12.5px; box-shadow: var(--shadow); z-index: 60; max-width: calc(100% - 32px); }
+.mx-legend-hint { color: var(--fg-3, #888); flex-basis: 100%; }
 .mx-none { color: var(--fg-3, #888); font-weight: 700; }
 .toast-act { margin-left: 10px; background: none; border: 0; color: var(--accent, #6b7cff); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 .toast-act:hover { text-decoration: underline; }
