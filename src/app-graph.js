@@ -1082,7 +1082,9 @@
           showTip(ev, tipForEdge(e));
           // a grouped edge stands for several relations: no single proof to preview, the tooltip lists them
           if (e.access && e.allRels && e.allRels.length > 1) return;
-          if (e.access) { const steps = stepsFor(e); if (steps && !proofWalk) { proofPreview = { steps, title: `${e.user} ${e.relation} ${e.object}` }; applyVisual(); } return; }
+          // numbered steps appear on the graph only when asked for (click here, Run in the Query lab, or
+          // "show on graph" from the matrix); hovering just lists them in the tooltip
+          if (e.access) return;
           if (!focus && !proofWalk) { hoverHl = edgeHl(e); applyVisual(); }
         })
         .on('mousemove', moveTip).on('mouseleave', function () { d3.select(this).classed('hover', false); hideTip(); if (hoverHl || proofPreview) { hoverHl = null; proofPreview = null; applyVisual(); } })
@@ -1336,7 +1338,7 @@
         const steps = stepsFor(e);
         if (e.allRels && e.allRels.length > 1) return `<code>${esc(e.user)} → ${esc(e.object)}</code><div class="sub">${e.allRels.length} derived relations on one edge — no tuple states any of them:</div><div class="sub"><b>${e.allRels.map(esc).join(', ')}</b></div><div class="sub">click to show one edge per relation (each with its own proof) · or ⋯ → Derived edges: one per relation</div>`;
         const more = e.split ? '<div class="sub">Shift-click to fold this pair back into one edge</div>' : '';
-        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code>${more}<div class="sub">derived — no tuple says this. Check follows these steps (numbered on the graph):</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to pin the walk · double-click to run this Check</div>`;
+        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code>${more}<div class="sub">derived — no tuple says this. Check follows these steps:</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to number these steps on the graph · double-click to run this Check in the Query lab</div>`;
       }
       if (mode === 'data' && e.derived) {
         const t = storeRef && storeRef.byId(e.tupleId);

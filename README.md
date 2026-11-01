@@ -40,8 +40,9 @@ wildcard/exclusion set algebra for ListUsers).
   - *Proof walk* – every allowed Check becomes numbered steps from the subject to the goal
     (`1 user:bob ─member→ group:eng · 2 group:eng#member ─viewer→ folder:product · 3 … · 4 viewer
     from parent ⇒ viewer`). The numbers sit on the exact edges, card arcs and derived edges the
-    resolver followed; a bar lists them, hovering a step flashes it. Hover a derived edge to
-    preview its walk, click to pin it; Esc clears.
+    resolver followed; a bar lists them, hovering a step flashes it. Numbers appear only when asked
+    for: Run in the Query lab, *show on graph* from the matrix, or a click on a derived edge (hovering
+    one lists the steps in its tooltip). Esc clears.
   - Everywhere: focus mode, multi-select with paths between nodes, layouts (dagre, lanes, force,
     radial), find, minimap, drag/pin, SVG/PNG export.
 - **Query lab** – Check / ListObjects / ListUsers / Expand with a numbered proof for ALLOWED
