@@ -1374,6 +1374,57 @@
     if (proof.notExcluded) chains.forEach((c) => { c.notExcluded = proof.notExcluded; });
     return chains;
   }
+  // The proof as an ordered walk from the subject to the goal — one step per tuple hop, implied
+  // relation or tuple-to-userset derivation — so a graph can number its edges and a sentence can
+  // list the same numbers. `from`/`to` are userset slots (object#relation) or subject node ids.
+  function proofSteps(proof) {
+    const steps = [];
+    if (!proof) return steps;
+    const subj = (u) => (u.wildcard ? `${u.type}:*` : `${u.type}:${u.id}`);
+    const walk = (p, group) => {
+      switch (p.kind) {
+        case 'direct': {
+          const t = p.tuple;
+          steps.push({ kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} is ${p.relation} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') });
+          return;
+        }
+        case 'wildcard': {
+          const t = p.tuple;
+          steps.push({ kind: 'tuple', wildcard: true, tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `every ${t.user.type} is ${p.relation} of ${p.object}`, why: `the public grant ${t.user.raw} covers ${p.user}` });
+          return;
+        }
+        case 'userset': {
+          walk(p.child, group);
+          const t = p.tuple;
+          steps.push({ kind: 'tuple', userset: true, tupleId: t.id, from: `${t.user.type}:${t.user.id}#${t.user.relation}`, fromObject: `${t.user.type}:${t.user.id}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} are ${p.relation} of ${p.object}`, why: `a tuple grants it to the whole userset, and the steps above put the subject in it${t.condition ? ` (condition ${t.condition.name} holds)` : ''}` });
+          return;
+        }
+        case 'computed': {
+          walk(p.child, group);
+          const type = p.object.split(':')[0];
+          steps.push({ kind: 'computed', from: `${p.object}#${p.implied}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, implied: p.implied, gid: edgeGid(relNode(type, p.implied), relNode(type, p.relation), 'computed'), group, text: `${p.implied} ⇒ ${p.relation} on ${p.object}`, why: `the model says anyone who is ${p.implied} is also ${p.relation}` });
+          return;
+        }
+        case 'ttu': {
+          walk(p.child, group);
+          const t = p.tuple, parent = t.user.raw, type = p.object.split(':')[0], ptype = t.user.type;
+          steps.push({ kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.tupleset}`, object: p.object, relation: p.tupleset, group, text: `${parent} is ${p.tupleset} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') });
+          steps.push({ kind: 'ttu', tupleId: t.id, from: `${parent}#${p.computed}`, fromObject: parent, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, tupleset: p.tupleset, computed: p.computed, parent, gid: edgeGid(relNode(ptype, p.computed), relNode(type, p.relation), 'ttu', p.tupleset), group, text: `${p.computed} of ${parent} ⇒ ${p.relation} of ${p.object}`, why: `"${p.relation}: ${p.computed} from ${p.tupleset}" — whoever is ${p.computed} of its ${p.tupleset} is ${p.relation} here` });
+          return;
+        }
+        case 'all': {
+          p.parts.forEach((part, i) => walk(part, (group ? group + '.' : '') + String.fromCharCode(65 + i)));
+          steps.push({ kind: 'and', object: p.object, relation: p.relation, group, text: `all ${p.parts.length} of these hold → ${p.relation} of ${p.object}`, why: 'the relation is an intersection: every branch must be satisfied' });
+          return;
+        }
+        default:
+      }
+    };
+    walk(proof, '');
+    if (proof.notExcluded) steps.push({ kind: 'not', object: proof.object, relation: proof.relation, text: `and not ${proof.notExcluded}`, why: 'the relation has a "but not" branch; the subject is not in it' });
+    steps.forEach((st, i) => { st.n = i + 1; });
+    return steps;
+  }
   function chainText(chain) {
     const parts = [];
     chain.segments.forEach((sg, i) => {
@@ -1416,7 +1467,7 @@
     parseDSL, parseRewrite, describeRewrite, describeEntry, walkRewrite,
     modelToJSON, ulid, modelEdges, buildModelGraph, buildDataGraph,
     parseUserRef, parseObjectRef, parseTupleLine, parseTuples, validateTuple, tupleKey, formatTuple, arrowTuple,
-    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, chainText,
+    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofSteps, chainText,
     evaluateCondition, CEL,
   };
 });

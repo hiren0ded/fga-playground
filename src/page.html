@@ -174,6 +174,7 @@
         <div class="graph-tip" id="graph-tip" hidden></div>
         <div class="graph-empty" id="graph-empty" hidden></div>
         <div class="matrix" id="matrix"></div>
+        <div class="proof-bar" id="proof-bar" hidden></div>
       </div>
       <div class="graph-status">
         <span id="graph-status"></span>
@@ -187,7 +188,7 @@
           <span><b class="mx-k direct"></b> direct tuple</span><span><b class="mx-k derived"></b> derived (computed, userset or parent)</span><span><b class="mx-k public"></b> public wildcard</span><span><b class="mx-x">✕</b> excluded by "but not"</span><span id="legend-mx-diff" hidden><b class="dadd">+ gained</b> <b class="drem">− lost</b> vs the compared model</span><span>click a cell to Check it</span>
         </div>
         <div class="legend" id="legend-data" hidden>
-          <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><i class="derived"></i>derived access</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
+          <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><i class="derived"></i>⇢ derived access (hollow arrow)</span><span><b class="pb-k">1 2 3</b> proof steps</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
         </div>
       </div>
     </section>

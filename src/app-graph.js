@@ -164,6 +164,7 @@
     const gEdges = root.append('g').attr('class', 'layer-edges');
     const gNodes = root.append('g').attr('class', 'layer-nodes');
     const gTemp = root.append('g').attr('class', 'layer-temp');
+    const gBadges = root.append('g').attr('class', 'layer-badges');
     const stage = $('#graph-stage'), tip = $('#graph-tip'), empty = $('#graph-empty');
     const mini = d3.select('#minimap');
     let curT = d3.zoomIdentity;
@@ -182,6 +183,9 @@
     // instance graph (data view): which objects open as cards with one slot per relation
     let cardsMode = 'path', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
     let derivedAccess = null; // [{ user, relation, object, wildcard }] materialised access that no tuple states directly
+    // proof walk: a numbered path (FGA.proofSteps) drawn over the data graph. `proofWalk` is pinned by a
+    // click / a Check result; `proofPreview` follows the pointer over a derived edge.
+    let proofWalk = null, proofPreview = null, proofObjects = new Set();
     let typeIndex = new Map(), relIndex = new Map();
     let curVG = null, curL = null, bounds = null, lastStage = { w: 0, h: 0 }, insetBottom = 0;
     let currentHl = null, lastOpts = {}, hoverHl = null, focus = null;
@@ -263,7 +267,7 @@
       const m = modelRef, store = storeRef;
       const typeOf = (t) => (m ? m.typeMap.get(t) : null);
       const canCard = (n) => { if (n.kind !== 'object') return false; const t = typeOf(n.type); return !!(t && t.relations.length); };
-      const wantCard = (n) => { if (!canCard(n)) return false; if (cardOverride.has(n.id)) return cardOverride.get(n.id); return cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(n.id); };
+      const wantCard = (n) => { if (!canCard(n)) return false; if (proofObjects.has(n.id)) return true; if (cardOverride.has(n.id)) return cardOverride.get(n.id); return cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(n.id); };
       const nodes = g0.nodes.map((n) => {
         if (!wantCard(n)) return Object.assign({}, n, { expandable: canCard(n) });
         const t = typeOf(n.type);
@@ -386,6 +390,7 @@
     }
     function edgeText(e) {
       if (mode === 'schema') return schemaEdgeText(e);
+      if (e.access) return e.label ? `⇢ ${e.label}` : '';
       return e.label || '';
     }
 
@@ -616,7 +621,7 @@
     function baseMarker(e) {
       if (e.diff === 'removed') return 'url(#arrow-removed)';
       if (e.diff === 'added') return 'url(#arrow-added)';
-      if (mode === 'data') return `url(#arrow-rel-${(relIndex.has(e.rel) ? relIndex.get(e.rel) : hashStr(e.rel)) % REL_PALETTE.length})`;
+      if (mode === 'data') return `url(#arrow-rel${e.access ? 'h' : ''}-${(relIndex.has(e.rel) ? relIndex.get(e.rel) : hashStr(e.rel)) % REL_PALETTE.length})`;
       return `url(#arrow-${e.ctx === 'exclusion' ? 'exclusion' : (e.kind === 'computed' || e.kind === 'ttu' || e.kind === 'tree') ? e.kind : 'direct'})`;
     }
 
@@ -631,7 +636,7 @@
       if (mode === 'matrix') {
         // the access matrix is an HTML table drawn by the app; the svg stays empty underneath
         gClusters.selectAll('*').remove(); gEdges.selectAll('*').remove(); gNodes.selectAll('*').remove();
-        empty.hidden = true; bounds = null; curL = null; curVG = null; updateMinimap();
+        empty.hidden = true; bounds = null; curL = null; curVG = null; updateMinimap(); renderProofBar(); gBadges.selectAll('*').remove();
         emit('renderMatrix');
         return;
       }
@@ -641,7 +646,7 @@
         gClusters.selectAll('*').remove(); gEdges.selectAll('*').remove(); gNodes.selectAll('*').remove();
         empty.hidden = false;
         empty.textContent = mode === 'data' ? 'No tuples yet. Add relationship tuples (user relation object) to see the data graph.' : mode === 'model' ? 'No relations yet. Define a relation in the Model DSL to see how it resolves.' : 'No valid model yet. Define at least one type in the Model DSL to see its graph.';
-        bounds = null; curL = null; updateMinimap();
+        bounds = null; curL = null; updateMinimap(); renderProofBar(); gBadges.selectAll('*').remove();
         return;
       }
       empty.hidden = true;
@@ -653,10 +658,14 @@
         Array.from(new Set(L.edges.map((e) => e.rel))).forEach((r) => {
           const id = `arrow-rel-${(relIndex.has(r) ? relIndex.get(r) : hashStr(r)) % REL_PALETTE.length}`;
           if (defs.select(`#${id}`).empty()) defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 9).attr('markerHeight', 9).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('fill', relColor(r));
+          // hollow variant for derived (materialised) access
+          const hid = id.replace('arrow-rel-', 'arrow-relh-');
+          if (defs.select(`#${hid}`).empty()) defs.append('marker').attr('id', hid).attr('viewBox', '0 0 12 12').attr('refX', 10).attr('refY', 6).attr('markerWidth', 11).attr('markerHeight', 11).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M1.5,1.5 L10.5,6 L1.5,10.5 z').attr('class', 'mk-hollow').attr('stroke', relColor(r));
         });
       }
       draw(L, animate && lastMode === mode);
       lastMode = mode;
+      renderProofBar();
       fit(false);
       afterRender();
     }
@@ -696,8 +705,14 @@
         drawEdgeLabel(sel.select('g.lbl'), e, dur);
       });
       eg.on('dblclick', (ev, e) => { if (e.access) { ev.stopPropagation(); hideTip(); emit('runCheck', { user: e.user, relation: e.relation, object: e.object }); } })
-        .on('mouseenter', (ev, e) => { showTip(ev, tipForEdge(e)); if (!focus) { hoverHl = edgeHl(e); applyVisual(); } })
-        .on('mousemove', moveTip).on('mouseleave', () => { hideTip(); if (hoverHl) { hoverHl = null; applyVisual(); } })
+        .on('click', (ev, e) => { if (!e.access) return; ev.stopPropagation(); hideTip(); const steps = stepsFor(e); if (steps) showProof(steps, { pin: true, title: `${e.user} ${e.relation} ${e.object}` }); })
+        .on('mouseenter', function (ev, e) {
+          d3.select(this).classed('hover', true).raise();
+          showTip(ev, tipForEdge(e));
+          if (e.access) { const steps = stepsFor(e); if (steps && !proofWalk) { proofPreview = { steps, title: `${e.user} ${e.relation} ${e.object}` }; applyVisual(); } return; }
+          if (!focus && !proofWalk) { hoverHl = edgeHl(e); applyVisual(); }
+        })
+        .on('mousemove', moveTip).on('mouseleave', function () { d3.select(this).classed('hover', false); hideTip(); if (hoverHl || proofPreview) { hoverHl = null; proofPreview = null; applyVisual(); } })
         .on('contextmenu', (ev, e) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'edge', datum: e, mode }, ev); });
       // nodes / cards
       const ng = gNodes.selectAll('g.node').data(L.nodes, (n) => n.id).join(
@@ -862,6 +877,7 @@
           d3.select(this).attr('transform', `translate(${n.x - n.width / 2},${n.y - n.height / 2})`);
           const byId = new Map(curL.nodes.map((m) => [m.id, m]));
           incident.forEach((e) => { e.points = null; const geo = edgePath(e, byId); e.mid = geo.mid; const sel = gEdges.select(`g.edge[data-id="${cssEsc(e.id)}"]`); sel.select('path.hit').attr('d', geo.d); sel.select('path.main').attr('d', geo.d); drawEdgeLabel(sel.select('g.lbl'), e, 0); });
+          if (proofWalk || proofPreview) placeBadges();
           if (mode === 'model') { computeClusters(curL); gClusters.selectAll('g.cluster').each(function (c) { const s = d3.select(this); s.select('rect:not(.hdr-hit)').attr('x', c.x - c.width / 2).attr('y', c.y - c.height / 2).attr('width', c.width).attr('height', c.height); s.select('text').attr('x', c.x - c.width / 2 + 10).attr('y', c.y - c.height / 2 + 14); s.select('rect.hdr-hit').attr('x', c.x - c.width / 2).attr('y', c.y - c.height / 2).attr('width', c.width); }); }
         })
         .on('end', function (ev, n) {
@@ -915,14 +931,8 @@
     }
     function tipForEdge(e) {
       if (mode === 'data' && e.access) {
-        if (!e.proof && modelRef && storeRef) {
-          try {
-            const res = FGA.check(modelRef, storeRef, { user: e.user, relation: e.relation, object: e.object, context: {} });
-            const chains = res.root ? FGA.proofChains(res.root.proof) : [];
-            e.proof = chains.length ? chains.map((c) => FGA.chainText(c)) : [res.allowed ? 'allowed' : 'not allowed any more — the store changed'];
-          } catch (err) { e.proof = [`could not explain: ${err.message}`]; }
-        }
-        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code><div class="sub">derived access — no tuple says this, Check answers yes because:</div><code>${esc((e.proof || []).join('\n'))}</code><div class="sub">double-click to run this Check</div>`;
+        const steps = stepsFor(e);
+        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code><div class="sub">derived — no tuple says this. Check follows these steps (numbered on the graph):</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to pin the walk · double-click to run this Check</div>`;
       }
       if (mode === 'data' && e.derived) {
         const t = storeRef && storeRef.byId(e.tupleId);
@@ -953,7 +963,8 @@
     function setInsets({ bottom }) { insetBottom = bottom || 0; fit(false); }
     function fitBox(b, animate, maxK = 1.75) {
       const top = fbar && !fbar.hidden ? Math.min(fbar.offsetHeight + 14, stage.clientHeight * 0.45) : 0;
-      const w = stage.clientWidth, h = stage.clientHeight - insetBottom - top;
+      const bottomBar = pbar && !pbar.hidden ? Math.min(pbar.offsetHeight + 14, stage.clientHeight * 0.4) : 0;
+      const w = stage.clientWidth, h = stage.clientHeight - insetBottom - bottomBar - top;
       if (!w || h <= 40 || !b) return;
       const k = Math.min(maxK, 0.92 * Math.min(w / b.w, h / b.h));
       const t = d3.zoomIdentity.translate((w - b.w * k) / 2 - b.x0 * k, top + (h - b.h * k) / 2 - b.y0 * k).scale(k);
@@ -1117,6 +1128,9 @@
       svgEl.classList.toggle('isolate', !!(focus && focus.isolate));
       svgEl.classList.toggle('multi', !!(focus && focus.multi));
       gEdges.selectAll('g.edge').each(function (e) { this.classList.toggle('off', mode === 'data' && e.rels.every((r) => hiddenRels.has(r))); });
+      const walk = mode === 'data' ? (proofWalk || proofPreview) : null;
+      if (walk) { paint(proofHlOf(walk.steps), { stepping: true, proof: true }); placeBadges(); if (wasIsolated) fit(true); return; }
+      gBadges.selectAll('*').remove();
       if (focus) {
         let hl;
         if (focus.pathIdx >= 0 && focus.paths && focus.paths[focus.pathIdx]) { const p = focus.paths[focus.pathIdx]; const nodes = {}, edges = {}; p.nodes.forEach((n, i) => { nodes[n] = i === 0 || i === p.nodes.length - 1 ? 'active' : 'ok'; }); p.edges.forEach((e) => { edges[e] = 'ok'; }); hl = toHl({ nodes, edges }); }
@@ -1133,6 +1147,7 @@
       const svgEl = svg.node();
       svgEl.classList.toggle('stepping', !!opts.stepping);
       svgEl.classList.toggle('focusing', !!opts.focus);
+      svgEl.classList.toggle('proofing', !!opts.proof);
       root.selectAll('.node, .edge, .cluster, .row, .ilink').each(function () { this.classList.remove(...HL); });
       if (!hl) { svgEl.classList.remove('has-hl'); gEdges.selectAll('g.edge').each(function (e) { d3.select(this).select('path.main').attr('marker-end', baseMarker(e)); }); return; }
       const rank = { skip: 0, ghost: 0, read: 1, active: 2, in: 2, out: 2, fail: 3, ok: 4 };
@@ -1265,6 +1280,136 @@
       updateLod(curT.k);
     }
 
+    // ── proof walk
+    // Steps come from FGA.proofSteps: one per tuple hop, implied relation or tuple-to-userset
+    // derivation, numbered from the subject to the goal. The same numbers are drawn as badges on the
+    // edges / card arcs they refer to and listed in the bar at the bottom of the stage.
+    function stepsFor(e) {
+      if (e.steps !== undefined) return e.steps;
+      e.steps = null;
+      if (!modelRef || !storeRef) return null;
+      try {
+        const res = FGA.check(modelRef, storeRef, { user: e.user, relation: e.relation, object: e.object, context: {} });
+        if (res.allowed && res.root) e.steps = FGA.proofSteps(res.root.proof);
+        else e.proofError = res.error || 'not allowed any more — the store changed';
+      } catch (err) { e.proofError = err.message; }
+      return e.steps;
+    }
+    const stepShort = (st) => {
+      if (st.kind === 'tuple') return `${st.from} ─${st.relation}→ ${st.object}`;
+      if (st.kind === 'computed') return `${st.implied} ⇒ ${st.relation}`;
+      if (st.kind === 'ttu') return `${st.computed} from ${st.tupleset} ⇒ ${st.relation}`;
+      if (st.kind === 'and') return `∧ all hold → ${st.relation}`;
+      return st.text;
+    };
+    function stepsHtml(steps) {
+      return `<ol class="steps">${steps.map((st) => `<li><b>${st.n}</b><span>${esc(st.text)}</span></li>`).join('')}</ol>`;
+    }
+    function proofHlOf(steps) {
+      const hl = { dataNodes: {}, dataEdges: {}, modelEdges: {}, tupleIds: [] };
+      steps.forEach((st) => {
+        if (st.tupleId != null) { hl.dataEdges[`t${st.tupleId}`] = 'ok'; hl.tupleIds.push(st.tupleId); }
+        [st.from, st.to].forEach((k) => { if (!k) return; hl.dataNodes[k] = 'ok'; hl.dataNodes[k.split('#')[0]] = 'ok'; });
+        if (st.fromObject) hl.dataNodes[st.fromObject] = 'ok';
+        if (st.object) hl.dataNodes[st.object] = 'ok';
+        if (st.gid) hl.modelEdges[st.gid] = 'ok';
+      });
+      return hl;
+    }
+    function showProof(steps, opts = {}) {
+      if (!steps || !steps.length) { clearProof(); return; }
+      const objs = new Set();
+      steps.forEach((st) => { if (st.object) objs.add(st.object); if (st.fromObject) objs.add(st.fromObject); [st.from, st.to].forEach((k) => { if (k && k.includes('#')) objs.add(k.split('#')[0]); }); });
+      const canOpen = (o) => { const t = modelRef && modelRef.typeMap.get(o.split(':')[0]); return !!(t && t.relations.length); };
+      const isCardNow = (o) => !!(curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
+      proofWalk = { steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto };
+      proofPreview = null;
+      proofObjects = objs;
+      // open the cards the walk needs (slots and arcs only exist on cards)
+      if (mode === 'data' && Array.from(objs).some((o) => canOpen(o) && !isCardNow(o) && curL && curL.nodes.some((n) => n.id === o))) render(true);
+      else { renderProofBar(); applyVisual(); }
+      if (!opts.auto && mode === 'data') setTimeout(() => fitToHighlighted(true), 30);
+    }
+    function clearProof() {
+      if (!proofWalk && !proofPreview && !proofObjects.size) return;
+      const wouldStay = (o) => (cardOverride.has(o) ? cardOverride.get(o) : cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(o));
+      const closes = mode === 'data' && Array.from(proofObjects).some((o) => !wouldStay(o) && curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
+      proofWalk = null; proofPreview = null; proofObjects = new Set();
+      if (closes) render(true); else { renderProofBar(); applyVisual(); }
+    }
+    const pbar = $('#proof-bar');
+    function renderProofBar() {
+      if (!pbar) return;
+      const walk = mode === 'data' ? proofWalk : null;
+      pbar.hidden = !walk;
+      if (!walk) return;
+      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="pb-hint">${walk.steps.length} step${walk.steps.length === 1 ? '' : 's'} · hover a step to flash it, click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
+      $$('.pb-step', pbar).forEach((b) => {
+        const st = walk.steps[+b.dataset.i];
+        b.addEventListener('mouseenter', () => flashStep(st));
+        b.addEventListener('click', () => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); });
+      });
+      const back = $('#pb-back'); if (back) back.addEventListener('click', () => emit('proofBack', walk.back));
+      $('#pb-close').addEventListener('click', () => clearProof());
+    }
+    function flashStep(st) {
+      const ids = [];
+      if (st.tupleId != null) ids.push(`t${st.tupleId}`);
+      if (st.kind === 'ttu') ids.push(`ttu:${st.tupleId}:${st.relation}`);
+      if (st.to) ids.push(st.to);
+      if (st.from && st.from.includes('#')) ids.push(st.from);
+      flash(ids, 900);
+      gBadges.selectAll('g.badge').each(function (d) { if (d === st) { this.classList.remove('flash'); void this.getBoundingClientRect(); this.classList.add('flash'); setTimeout(() => this.classList.remove('flash'), 900); } });
+    }
+    function slotPos(slotId, byId, side) {
+      const obj = slotId.split('#')[0]; const card = byId.get(obj); if (!card) return null;
+      const dx = side === 'right' ? card.width / 2 + 14 : -card.width / 2 - 14;
+      if (card.kind === 'inst') { const i = card.rows.findIndex((r) => r.id === slotId); if (i >= 0) return { x: card.x + dx, y: card.y - card.height / 2 + rowCentre(i) }; }
+      return { x: card.x + dx, y: card.y };
+    }
+    function stepAnchor(st) {
+      if (!curL) return null;
+      const byId = new Map(curL.nodes.map((n) => [n.id, n]));
+      const onEdge = (e) => { if (!e || !e.mid) return null; const w = e.text ? measure(e.text, MONO_S) * 0.92 + 12 : 0; return { x: e.mid.x - (w ? w / 2 + 12 : 0), y: e.mid.y }; };
+      if (st.kind === 'tuple') return onEdge(curL.edges.find((x) => x.kind === 'tuple' && x.tupleIds.includes(st.tupleId))) || slotPos(st.to, byId, 'left');
+      if (st.kind === 'ttu') return onEdge(curL.edges.find((x) => x.kind === 'ttu' && x.tupleId === st.tupleId && x.rel === st.relation)) || slotPos(st.to, byId, 'left');
+      if (st.kind === 'computed') {
+        const card = byId.get(st.object);
+        if (card && card.kind === 'inst') {
+          const idx = card.links.findIndex((l) => l.from === st.implied && l.to === st.relation);
+          if (idx >= 0) {
+            const l = card.links[idx];
+            const i = card.rows.findIndex((r) => r.rel === l.from), j = card.rows.findIndex((r) => r.rel === l.to);
+            const x0 = card.width - card.arcW + 2 + (idx % 4) * 3, bulge = Math.max(6, card.arcW - 6 - (idx % 4) * 3);
+            return { x: card.x - card.width / 2 + x0 + bulge + 9, y: card.y - card.height / 2 + (rowCentre(i) + rowCentre(j)) / 2 };
+          }
+        }
+        return slotPos(st.to, byId, 'right');
+      }
+      if (st.kind === 'and' || st.kind === 'not') return slotPos(`${st.object}#${st.relation}`, byId, 'right');
+      return null;
+    }
+    function placeBadges() {
+      gBadges.selectAll('*').remove();
+      const walk = proofWalk || proofPreview;
+      if (!walk || !curL || mode !== 'data') return;
+      const used = new Map();
+      walk.steps.forEach((st) => {
+        const p = stepAnchor(st); if (!p) return;
+        const key = `${Math.round(p.x / 10)}|${Math.round(p.y / 10)}`; const k = used.get(key) || 0; used.set(key, k + 1);
+        const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}`).attr('transform', `translate(${p.x + k * 17},${p.y})`);
+        g.append('circle').attr('r', 9);
+        g.append('text').attr('y', 3.5).attr('text-anchor', 'middle').text(st.n);
+        g.on('mouseenter', (ev) => showTip(ev, `<code>${st.n}. ${esc(st.text)}</code><div class="sub">${esc(st.why || '')}</div>`)).on('mousemove', moveTip).on('mouseleave', hideTip);
+      });
+    }
+    function panToPoint(x, y, animate = true) {
+      const k = Math.max(curT.k, 1);
+      const w = stage.clientWidth, h = stage.clientHeight - insetBottom;
+      const t = d3.zoomIdentity.translate(w / 2 - x * k, h / 2 - y * k).scale(k);
+      (animate ? svg.transition().duration(400) : svg).call(zoom.transform, t);
+    }
+
     // ── focus bar
     const fbar = $('#focus-bar');
     function renderFocusBar() {
@@ -1394,7 +1539,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, get proofActive() { return !!proofWalk; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

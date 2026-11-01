@@ -29,7 +29,12 @@ wildcard/exclusion set algebra for ListUsers).
     hover. Cards can be opened for every object or none.
   - *Matrix* – subjects × objects for one relation: direct tuple, derived, public wildcard or
     excluded, with a diff against any written model version (gained / lost). Click a cell to
-    run that Check.
+    run that Check and walk its proof on the data graph.
+  - *Proof walk* – every allowed Check becomes numbered steps from the subject to the goal
+    (`1 user:bob ─member→ group:eng · 2 group:eng#member ─viewer→ folder:product · 3 … · 4 viewer
+    from parent ⇒ viewer`). The numbers sit on the exact edges, card arcs and derived edges the
+    resolver followed; a bar lists them, hovering a step flashes it. Hover a derived edge to
+    preview its walk, click to pin it; Esc clears.
   - Everywhere: focus mode, multi-select with paths between nodes, layouts (dagre, lanes, force,
     radial), find, minimap, drag/pin, SVG/PNG export.
 - **Query lab** – Check / ListObjects / ListUsers / Expand with a one-line proof for ALLOWED,

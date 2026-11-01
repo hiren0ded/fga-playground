@@ -809,3 +809,48 @@ table.mx td.c.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
 .legend .mx-k.derived { background: transparent; border: 2px dotted var(--fg-2); box-sizing: border-box; }
 .legend .mx-k.public { border-radius: 2px; background: color-mix(in srgb, var(--fg-2) 50%, transparent); }
 .legend .mx-x { color: var(--bad); }
+
+/* ── edge hover: the edge under the pointer pops out, even while something is focused */
+.edge.hover path.main { stroke-width: 3.2 !important; }
+.edge.hover text { fill: var(--fg) !important; font-weight: 700; }
+.edge.hover .lbl-bg { stroke: var(--line-2); stroke-width: 1; }
+svg.has-hl .edge.hover { opacity: 1 !important; }
+
+/* ── derived access: dotted, hollow arrowhead, italic ⇢ label */
+.edge.derived path.main { stroke-dasharray: 0.1 5; stroke-width: 2; stroke-linecap: round; opacity: 0.8; }
+.edge.derived.hl-ok path:not(.hit) { stroke-dasharray: 0.1 5; stroke-width: 3; }
+.mk-hollow { fill: var(--bg); stroke-width: 1.5; }
+
+/* ── proof walk: numbered badges on the path + the step bar */
+.layer-badges { pointer-events: all; }
+.badge circle { fill: var(--ok); stroke: var(--bg); stroke-width: 2; }
+.badge text { font-family: var(--font-mono); font-size: 11px; font-weight: 700; fill: #fff; pointer-events: none; }
+.badge.k-computed circle { fill: var(--edge-computed); }
+.badge.k-ttu circle { fill: var(--edge-ttu); }
+.badge.k-and circle, .badge.k-not circle { fill: var(--fg-2); }
+.badge.flash circle { animation: badge-pop 0.9s ease-out; }
+@keyframes badge-pop { 0% { r: 9; } 30% { r: 14; } 100% { r: 9; } }
+svg.proofing .node:not(.hl) rect, svg.proofing .node:not(.hl) text { opacity: 0.18; }
+svg.proofing .edge:not(.hl) { opacity: 0.08; }
+svg.proofing .card.inst.hl .row:not(.hl) text { opacity: 0.4; }
+.proof-bar { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 4; display: flex; flex-direction: column; gap: 6px; padding: 7px 10px 8px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow); font-size: 12px; backdrop-filter: blur(6px); }
+.graph-stage:has(.minimap:not([hidden])) .proof-bar { right: 176px; }
+.proof-bar .pb-head { display: flex; align-items: center; gap: 10px; }
+.proof-bar .pb-title { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg); display: inline-flex; align-items: center; gap: 8px; }
+.proof-bar .pb-title .pb-k { font-family: var(--font-body); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ok); font-weight: 600; }
+.proof-bar .pb-hint { color: var(--fg-3); font-size: 11px; }
+.proof-bar .pb-back { margin-left: auto; }
+.proof-bar .pb-close { flex: 0 0 auto; }
+.proof-bar .pb-head .pb-close:first-of-type:not(.pb-back) { margin-left: auto; }
+.proof-bar .pb-steps { display: flex; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+.proof-bar .pb-step { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--fg); font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
+.proof-bar .pb-step:hover { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
+.proof-bar .pb-step b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10.5px; }
+.proof-bar .pb-step.k-computed b { background: var(--edge-computed); }
+.proof-bar .pb-step.k-ttu b { background: var(--edge-ttu); }
+.proof-bar .pb-step.k-and b, .proof-bar .pb-step.k-not b { background: var(--fg-2); }
+.graph-tip ol.steps { margin: 6px 0 2px; padding: 0; list-style: none; }
+.graph-tip ol.steps li { display: flex; gap: 7px; align-items: flex-start; padding: 2px 0; font-family: var(--font-mono); font-size: 11.5px; }
+.graph-tip ol.steps li b { flex: 0 0 auto; display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10px; }
+.legend .pb-k { display: inline-block; padding: 0 5px; border-radius: 999px; background: var(--ok); color: #fff; font-size: 10px; }
+.graph-stage.mx-mode .proof-bar { display: none; }
