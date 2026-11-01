@@ -126,6 +126,7 @@
         <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>
         <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
         <label class="compare" id="res-wrap" hidden><span>relation</span><select class="ctl wide" id="res-select" title="Which relation's resolution to draw"><option value="">follow the query</option></select></label>
+        <button class="btn sm toggle" id="btn-derived" aria-pressed="false" title="Materialise derived access: every subject who holds a relation without a tuple saying so, as dashed edges with the proof on hover" hidden>derived</button>
         <label class="compare" id="cards-wrap" hidden><span>cards</span><select class="ctl" id="cards-select" title="Which objects open as cards with one slot (userset) per relation"><option value="path">on the query path</option><option value="all">every object</option><option value="none">none</option></select></label>
         <span class="hint" id="graph-hint"></span>
         <div class="find" id="find-wrap">
@@ -181,7 +182,7 @@
           <span><b>∨</b> any of · <b>∧</b> all of · <b>∖</b> but not</span><span><i></i>direct subjects</span><span><i class="computed"></i>computed (implied)</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>↻</b> recursive</span><span><b>+</b> expand a branch</span>
         </div>
         <div class="legend" id="legend-data" hidden>
-          <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
+          <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><i class="derived"></i>derived access</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
         </div>
       </div>
     </section>

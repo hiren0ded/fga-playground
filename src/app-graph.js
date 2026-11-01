@@ -181,6 +181,7 @@
     let treeRoot = null, treeQueryKey = null, treeExpanded = new Map();
     // instance graph (data view): which objects open as cards with one slot per relation
     let cardsMode = 'path', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
+    let derivedAccess = null; // [{ user, relation, object, wildcard }] materialised access that no tuple states directly
     let typeIndex = new Map(), relIndex = new Map();
     let curVG = null, curL = null, bounds = null, lastStage = { w: 0, h: 0 }, insetBottom = 0;
     let currentHl = null, lastOpts = {}, hoverHl = null, focus = null;
@@ -196,10 +197,11 @@
     const emit = (k, ...a) => { if (handlers[k]) return handlers[k](...a); return undefined; };
 
     // ── public setters
-    function setData({ schema, model, data, types, relations, modelObj, store }) {
+    function setData({ schema, model, data, types, relations, modelObj, store, derived }) {
       graphs = { schema, model, data };
       modelRef = modelObj || null;
       storeRef = store || null;
+      if (derived !== undefined) derivedAccess = derived;
       modelEdgesCache = modelRef ? FGA.modelEdges(modelRef) : null;
       cardOverride.forEach((v, id) => { if (!(data && data.nodes.some((n) => n.id === id))) cardOverride.delete(id); });
       typeIndex = new Map(types.map((t, i) => [t, i]));
@@ -219,6 +221,7 @@
       if (!same && mode === 'data' && cardsMode === 'path') render(true);
     }
     function toggleCard(id, on) { cardOverride.set(id, !!on); render(true); }
+    function setDerived(list) { derivedAccess = list || null; if (mode === 'data') render(true); }
     // resolution view: which relation is drawn. null = follow the current query.
     function resolutionKey() {
       if (!modelRef) return null;
@@ -308,6 +311,19 @@
             }
           }
         });
+      }
+      // materialised access: who ends up holding each relation without a tuple saying so
+      if (derivedAccess) {
+        const seen = new Set(edges.map((e) => `${e.fromSlot || e.from}|${e.toSlot || e.to}`));
+        for (const d of derivedAccess) {
+          const fromN = byId.get(d.user), toN = byId.get(d.object);
+          if (!fromN || !toN) continue;
+          const toSlot = toN.kind === 'inst' && toN.rowMap.has(d.relation) ? `${d.object}#${d.relation}` : null;
+          const id = `drv:${d.user}→${d.object}#${d.relation}`;
+          if (seen.has(`${d.user}|${toSlot || d.object}`) && !toSlot) continue; // a plain node already has a tuple edge from this subject
+          edges.push({ id, kind: 'derived', access: true, from: d.user, to: d.object, fromSlot: null, toSlot, tupleIds: [], rel: d.relation, rels: [d.relation], labels: [], usersets: [], conditions: [], contextual: false, wildcard: !!d.wildcard, label: toSlot ? '' : d.relation, user: d.user, relation: d.relation, object: d.object });
+          if (toSlot) toN.rowMap.get(d.relation).derived++;
+        }
       }
       const pairs = new Set(edges.map((e) => `${e.from}|${e.to}`));
       edges.forEach((e) => { e.reverse = pairs.has(`${e.to}|${e.from}`); });
@@ -670,7 +686,8 @@
         main.attr('marker-end', baseMarker(e));
         drawEdgeLabel(sel.select('g.lbl'), e, dur);
       });
-      eg.on('mouseenter', (ev, e) => { showTip(ev, tipForEdge(e)); if (!focus) { hoverHl = edgeHl(e); applyVisual(); } })
+      eg.on('dblclick', (ev, e) => { if (e.access) { ev.stopPropagation(); hideTip(); emit('runCheck', { user: e.user, relation: e.relation, object: e.object }); } })
+        .on('mouseenter', (ev, e) => { showTip(ev, tipForEdge(e)); if (!focus) { hoverHl = edgeHl(e); applyVisual(); } })
         .on('mousemove', moveTip).on('mouseleave', () => { hideTip(); if (hoverHl) { hoverHl = null; applyVisual(); } })
         .on('contextmenu', (ev, e) => { ev.preventDefault(); ev.stopPropagation(); hideTip(); emit('context', { kind: 'edge', datum: e, mode }, ev); });
       // nodes / cards
@@ -888,6 +905,16 @@
       return `<code>${esc(n.label)}</code><div class="sub">${n.kind === 'wildcard' ? 'public access: every ' + esc(n.type) : 'type ' + esc(n.type)} · ${n.tuples.length} tuple${n.tuples.length === 1 ? '' : 's'}</div>${degreeInfo(n.id)}<code>${esc(tuples.join('\n'))}${n.tuples.length > 6 ? '\n…' : ''}</code><div class="sub">click to focus · double-click for queries · drag to move · Alt-drag to another node to write a tuple${n.card ? ' · – collapses the card' : n.expandable ? ' · + opens it as a card' : ''}</div>`;
     }
     function tipForEdge(e) {
+      if (mode === 'data' && e.access) {
+        if (!e.proof && modelRef && storeRef) {
+          try {
+            const res = FGA.check(modelRef, storeRef, { user: e.user, relation: e.relation, object: e.object, context: {} });
+            const chains = res.root ? FGA.proofChains(res.root.proof) : [];
+            e.proof = chains.length ? chains.map((c) => FGA.chainText(c)) : [res.allowed ? 'allowed' : 'not allowed any more — the store changed'];
+          } catch (err) { e.proof = [`could not explain: ${err.message}`]; }
+        }
+        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code><div class="sub">derived access — no tuple says this, Check answers yes because:</div><code>${esc((e.proof || []).join('\n'))}</code><div class="sub">double-click to run this Check</div>`;
+      }
       if (mode === 'data' && e.derived) {
         const t = storeRef && storeRef.byId(e.tupleId);
         return `<code>${esc(e.fromSlot || e.from)} → ${esc(e.toSlot)}</code><div class="sub">derived, not a tuple: <b>${esc(e.computed)} from ${esc(e.tupleset)}</b> — whoever is ${esc(e.computed)} of ${esc(e.from)} is ${esc(e.rel)} of ${esc(e.to)}${t ? `, because of the tuple <code>${esc(FGA.formatTuple(t))}</code>` : ''}</div>`;
@@ -1136,7 +1163,11 @@
       }
       gEdges.selectAll('g.edge').each(function (e) {
         let best = null;
-        if (e.derived) {
+        if (e.access) {
+          // materialised access lights up when both ends are proven in the current highlight
+          const a = nodes[e.from], b = e.toSlot ? nodes[e.toSlot] : nodes[e.to];
+          if (a && b && rank[a] >= rank.active && rank[b] >= rank.active) best = a === 'ok' && b === 'ok' ? 'ok' : 'read';
+        } else if (e.derived) {
           // a tuple-to-userset edge lights up with the tuple it derives from, when its slot is in play
           const st = edgesHl[`t${e.tupleId}`];
           if (st && (nodes[e.toSlot] || nodes[e.to] || nodes[e.fromSlot] || nodes[e.from])) best = st;
@@ -1353,7 +1384,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

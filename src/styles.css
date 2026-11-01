@@ -232,6 +232,7 @@ kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 5px; border
 .legend i.computed { border-top-style: dashed; border-top-color: var(--edge-computed); }
 .legend i.ttu { border-top-style: dotted; border-top-color: var(--edge-ttu); }
 .legend i.ex { border-top-color: var(--bad); }
+.legend i.derived { border-top-style: dotted; border-top-width: 2px; border-top-color: var(--fg-3); }
 .legend b { font-weight: 600; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
 .graph-ctl { display: inline-flex; gap: 4px; margin-left: auto; }
 .graph-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background:
@@ -767,3 +768,8 @@ svg.has-hl.stepping:not(.focusing) .card.inst.hl path.ilink:not(.hl) { opacity: 
 .edge.ttu text { fill: var(--edge-ttu); }
 .node.object .card-toggle { opacity: 0.55; transition: opacity 0.15s; }
 .node.object:hover .card-toggle { opacity: 1; }
+
+/* ── derived access (materialised grants) */
+.edge.derived path.main { stroke: var(--e, var(--fg-3)); stroke-dasharray: 1.5 4.5; stroke-linecap: round; opacity: 0.85; }
+.edge.derived text { fill: color-mix(in srgb, var(--e, var(--fg-2)) 72%, var(--fg)); font-style: italic; }
+.edge.derived.hl-ok path:not(.hit) { stroke-dasharray: 1.5 4.5; }

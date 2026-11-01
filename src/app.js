@@ -256,7 +256,7 @@ user:* viewer document:readme
     const relations = S.effectiveModel ? Array.from(new Set(S.effectiveModel.types.flatMap((t) => t.relations.map((r) => r.name)))) : [];
     const baseModel = compareBase(st);
     Graph.setPins(st.pins); Graph.setCollapsed(st.collapsed);
-    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel, store: S.store });
+    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel, store: S.store, derived: S.ui.derived ? computeDerived() : null });
     renderCompareSelect(st);
     renderResSelect();
     renderTimeTravelBanner(st);
@@ -958,6 +958,27 @@ user:* viewer document:readme
     persist();
   }
   $$('#pane-editor .pane-tabs button').forEach((b) => b.addEventListener('click', () => setEditorTab(b.dataset.tab)));
+  // Materialised access for the data view: every (user, relation, object) that Check would allow but
+  // no tuple states directly — one ListUsers per userset slot per plain subject type.
+  function computeDerived() {
+    const m = S.effectiveModel, st = S.store; if (!m || !st) return [];
+    const userTypes = new Set();
+    m.types.forEach((t) => t.relations.forEach((r) => r.directTypes.forEach((e) => { if (!e.relation) userTypes.add(e.type); })));
+    const direct = new Set(st.tuples.map((t) => `${t.user.raw}|${t.relation}|${t.object.raw}`));
+    const out = [];
+    let calls = 0;
+    for (const obj of st.allObjects()) {
+      const t = m.typeMap.get(obj.split(':')[0]); if (!t) continue;
+      for (const r of t.relations) for (const ut of userTypes) {
+        if (++calls > 1500) { toast('Derived access: the store is too large to materialise everything, showing a partial view'); return out; }
+        const res = FGA.listUsers(m, st, { object: obj, relation: r.name, userType: ut, context: {} });
+        if (res.error) continue;
+        res.users.forEach((u) => { if (!direct.has(`${u}|${r.name}|${obj}`)) out.push({ user: u, relation: r.name, object: obj }); });
+        if (res.wildcard && !direct.has(`${ut}:*|${r.name}|${obj}`)) out.push({ user: `${ut}:*`, relation: r.name, object: obj, wildcard: true });
+      }
+    }
+    return out;
+  }
   const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: tuples as edges into object#relation slots — objects the query walked open as cards' };
   function syncGraphToolbar() {
     const m = Graph.mode;
@@ -969,12 +990,23 @@ user:* viewer document:readme
     if (m === 'model') renderResSelect();
     $('#cards-wrap').hidden = m !== 'data';
     $('#cards-select').value = Graph.cardsMode;
+    $('#btn-derived').hidden = m !== 'data';
+    $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
   }
   function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
   Graph.on('rootChanged', () => renderResSelect());
   $('#cards-select').addEventListener('change', () => { S.ui.cards = $('#cards-select').value; Graph.setCardsMode(S.ui.cards); persist(); });
+  $('#btn-derived').addEventListener('click', () => {
+    S.ui.derived = !S.ui.derived;
+    $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
+    const list = S.ui.derived ? computeDerived() : null;
+    Graph.setDerived(list);
+    if (S.ui.derived) toast(list.length ? `${list.length} derived grant${list.length === 1 ? '' : 's'}: dashed edges, hover for the proof` : 'No derived access: every grant in this store is a direct tuple');
+    persist();
+  });
+  Graph.on('runCheck', ({ user, relation, object }) => { Query.load(Object.assign({}, Query.q, { type: 'check', user, relation, object })); Query.run({}); if (mq.matches) { S.ui.mobileView = 'query'; applyMobile(); } });
   $('#btn-connect').addEventListener('click', () => { const on = !Graph.connectMode; Graph.setConnectMode(on); $('#btn-connect').setAttribute('aria-pressed', String(on)); if (on) toast('Connect mode: drag from a user to an object to write a tuple'); });
   // layout & export menu
   const gmenu = $('#gmenu');
