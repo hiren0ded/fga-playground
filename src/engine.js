@@ -1374,62 +1374,68 @@
     if (proof.notExcluded) chains.forEach((c) => { c.notExcluded = proof.notExcluded; });
     return chains;
   }
-  // The proof as an ordered walk — one step per tuple hop, implied relation or tuple-to-userset
-  // derivation — so a graph can number its edges and a sentence can list the same numbers.
+  // The proof as a tree of steps — one step per tuple hop, implied relation or tuple-to-userset
+  // derivation — plus the same steps flattened and numbered, so a graph can number its edges, a
+  // matrix its cells and a sentence can list the same numbers.
   // order 'check' numbers the steps the way Check resolves them: from the queried object#relation
   // down to the subject (rewrite first, then the tuple it reads, then the sub-check). order 'flow'
   // numbers them the way access flows: from the subject up to the goal. The steps themselves are
-  // the same facts either way; `from`/`to` are userset slots (object#relation) or subject node ids.
-  function proofSteps(proof, order = 'check') {
-    const steps = [];
-    if (!proof) return steps;
+  // the same facts either way; `from`/`to` are userset slots (object#relation) or subject node ids,
+  // and `key` identifies a step across orders.
+  function proofTree(proof, order = 'check') {
     const down = order === 'check';
     const subj = (u) => (u.wildcard ? `${u.type}:*` : `${u.type}:${u.id}`);
-    const walk = (p, group) => {
+    const mk = (st) => Object.assign(st, { key: [st.kind, st.tupleId ?? '', st.from || '', st.to || '', st.object || '', st.relation || ''].join('|') });
+    const build = (p, group) => {
       switch (p.kind) {
         case 'direct': {
           const t = p.tuple;
-          steps.push({ kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} is ${p.relation} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') });
-          return;
+          return { step: mk({ kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} is ${p.relation} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') }), children: [] };
         }
         case 'wildcard': {
           const t = p.tuple;
-          steps.push({ kind: 'tuple', wildcard: true, tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `every ${t.user.type} is ${p.relation} of ${p.object}`, why: `the public grant ${t.user.raw} covers the subject` });
-          return;
+          return { step: mk({ kind: 'tuple', wildcard: true, tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `every ${t.user.type} is ${p.relation} of ${p.object}`, why: `the public grant ${t.user.raw} covers the subject` }), children: [] };
         }
         case 'userset': {
           const t = p.tuple;
-          const own = { kind: 'tuple', userset: true, tupleId: t.id, from: `${t.user.type}:${t.user.id}#${t.user.relation}`, fromObject: `${t.user.type}:${t.user.id}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} are ${p.relation} of ${p.object}`, why: down ? 'a tuple grants it to the whole userset — is the subject in it? (next steps)' : `a tuple grants it to the whole userset, and the steps above put the subject in it${t.condition ? ` (condition ${t.condition.name} holds)` : ''}` };
-          if (down) { steps.push(own); walk(p.child, group); } else { walk(p.child, group); steps.push(own); }
-          return;
+          const own = mk({ kind: 'tuple', userset: true, tupleId: t.id, from: `${t.user.type}:${t.user.id}#${t.user.relation}`, fromObject: `${t.user.type}:${t.user.id}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, group, text: `${t.user.raw} are ${p.relation} of ${p.object}`, why: down ? 'a tuple grants it to the whole userset — is the subject in it? (next steps)' : `a tuple grants it to the whole userset, and the steps above put the subject in it${t.condition ? ` (condition ${t.condition.name} holds)` : ''}` });
+          return { step: own, children: [build(p.child, group)] };
         }
         case 'computed': {
           const type = p.object.split(':')[0];
-          const own = { kind: 'computed', from: `${p.object}#${p.implied}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, implied: p.implied, gid: edgeGid(relNode(type, p.implied), relNode(type, p.relation), 'computed'), group, text: down ? `${p.relation} on ${p.object} ⇐ ${p.implied}` : `${p.implied} ⇒ ${p.relation} on ${p.object}`, why: down ? `the model says anyone who is ${p.implied} is also ${p.relation} — so check ${p.implied}` : `the model says anyone who is ${p.implied} is also ${p.relation}` };
-          if (down) { steps.push(own); walk(p.child, group); } else { walk(p.child, group); steps.push(own); }
-          return;
+          const own = mk({ kind: 'computed', from: `${p.object}#${p.implied}`, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, implied: p.implied, gid: edgeGid(relNode(type, p.implied), relNode(type, p.relation), 'computed'), group, text: down ? `${p.relation} on ${p.object} ⇐ ${p.implied}` : `${p.implied} ⇒ ${p.relation} on ${p.object}`, why: down ? `the model says anyone who is ${p.implied} is also ${p.relation} — so check ${p.implied}` : `the model says anyone who is ${p.implied} is also ${p.relation}` });
+          return { step: own, children: [build(p.child, group)] };
         }
         case 'ttu': {
           const t = p.tuple, parent = t.user.raw, type = p.object.split(':')[0], ptype = t.user.type;
-          const read = { kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.tupleset}`, object: p.object, relation: p.tupleset, group, text: `${parent} is ${p.tupleset} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') };
-          const rule = { kind: 'ttu', tupleId: t.id, from: `${parent}#${p.computed}`, fromObject: parent, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, tupleset: p.tupleset, computed: p.computed, parent, gid: edgeGid(relNode(ptype, p.computed), relNode(type, p.relation), 'ttu', p.tupleset), group, text: down ? `${p.relation} of ${p.object} ⇐ ${p.computed} of its ${p.tupleset}` : `${p.computed} of ${parent} ⇒ ${p.relation} of ${p.object}`, why: `"${p.relation}: ${p.computed} from ${p.tupleset}" — whoever is ${p.computed} of its ${p.tupleset} is ${p.relation} here` };
-          if (down) { steps.push(rule); steps.push(read); walk(p.child, group); } else { walk(p.child, group); steps.push(read); steps.push(rule); }
-          return;
+          const read = mk({ kind: 'tuple', tupleId: t.id, from: subj(t.user), to: `${p.object}#${p.tupleset}`, object: p.object, relation: p.tupleset, group, text: `${parent} is ${p.tupleset} of ${p.object}`, why: 'a tuple says so' + (t.condition ? ` (condition ${t.condition.name} holds)` : '') });
+          const rule = mk({ kind: 'ttu', tupleId: t.id, from: `${parent}#${p.computed}`, fromObject: parent, to: `${p.object}#${p.relation}`, object: p.object, relation: p.relation, tupleset: p.tupleset, computed: p.computed, parent, gid: edgeGid(relNode(ptype, p.computed), relNode(type, p.relation), 'ttu', p.tupleset), group, text: down ? `${p.relation} of ${p.object} ⇐ ${p.computed} of its ${p.tupleset}` : `${p.computed} of ${parent} ⇒ ${p.relation} of ${p.object}`, why: `"${p.relation}: ${p.computed} from ${p.tupleset}" — whoever is ${p.computed} of its ${p.tupleset} is ${p.relation} here` });
+          return { step: rule, children: [{ step: read, children: [] }, build(p.child, group)] };
         }
         case 'all': {
-          const own = { kind: 'and', object: p.object, relation: p.relation, group, text: down ? `${p.relation} of ${p.object} needs all ${p.parts.length} branches` : `all ${p.parts.length} of these hold → ${p.relation} of ${p.object}`, why: 'the relation is an intersection: every branch must be satisfied' };
-          const parts = () => p.parts.forEach((part, i) => walk(part, (group ? group + '.' : '') + String.fromCharCode(65 + i)));
-          if (down) { steps.push(own); parts(); } else { parts(); steps.push(own); }
-          return;
+          const own = mk({ kind: 'and', object: p.object, relation: p.relation, group, text: down ? `${p.relation} of ${p.object} needs all ${p.parts.length} branches` : `all ${p.parts.length} of these hold → ${p.relation} of ${p.object}`, why: 'the relation is an intersection: every branch must be satisfied' });
+          return { step: own, children: p.parts.map((part, i) => build(part, (group ? group + '.' : '') + String.fromCharCode(65 + i))) };
         }
-        default:
+        default: return { step: null, children: [] };
       }
     };
-    walk(proof, '');
-    if (proof.notExcluded) steps.push({ kind: 'not', object: proof.object, relation: proof.relation, text: `and not ${proof.notExcluded}`, why: 'the relation has a "but not" branch; the subject is not in it (checked last)' });
+    const root = { step: null, children: [] };
+    if (proof) {
+      root.children.push(build(proof, ''));
+      if (proof.notExcluded) root.children.push({ step: mk({ kind: 'not', object: proof.object, relation: proof.relation, text: `and not ${proof.notExcluded}`, why: 'the relation has a "but not" branch; the subject is not in it (checked last)' }), children: [] });
+    }
+    // flatten: check order is pre-order (a step, then what it needed); flow order is post-order
+    const steps = [];
+    const flat = (n) => {
+      if (n.step && n.step.kind === 'not') { steps.push(n.step); return; }
+      if (down) { if (n.step) steps.push(n.step); n.children.forEach(flat); }
+      else { const kids = n.children.slice(); if (n.step && n.step.kind === 'ttu') kids.reverse(); kids.forEach(flat); if (n.step) steps.push(n.step); }
+    };
+    flat(root);
     steps.forEach((st, i) => { st.n = i + 1; });
-    return steps;
+    return { root, steps };
   }
+  function proofSteps(proof, order = 'check') { return proofTree(proof, order).steps; }
   function chainText(chain) {
     const parts = [];
     chain.segments.forEach((sg, i) => {
@@ -1472,7 +1478,7 @@
     parseDSL, parseRewrite, describeRewrite, describeEntry, walkRewrite,
     modelToJSON, ulid, modelEdges, buildModelGraph, buildDataGraph,
     parseUserRef, parseObjectRef, parseTupleLine, parseTuples, validateTuple, tupleKey, formatTuple, arrowTuple,
-    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofSteps, chainText,
+    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofTree, proofSteps, chainText,
     evaluateCondition, CEL,
   };
 });

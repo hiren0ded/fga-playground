@@ -29,7 +29,9 @@ wildcard/exclusion set algebra for ListUsers).
     hover. Cards can be opened for every object or none.
   - *Matrix* – subjects × objects for one relation: direct tuple, derived, public wildcard or
     excluded, with a diff against any written model version (gained / lost). Click a cell to
-    run that Check and walk its proof on the data graph.
+    run that Check and see its proof in place — as a matrix of usersets (the subject's row plus a
+    row per parent link / userset grant it leans on, foldable to "users only") or as Check's
+    recursion tree — or double-click to walk it on the data graph.
   - *Proof walk* – every allowed Check becomes numbered steps from the subject to the goal
     (`1 user:bob ─member→ group:eng · 2 group:eng#member ─viewer→ folder:product · 3 … · 4 viewer
     from parent ⇒ viewer`). The numbers sit on the exact edges, card arcs and derived edges the
