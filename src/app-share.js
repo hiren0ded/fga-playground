@@ -22,25 +22,27 @@
       if (kind === '1' && !canZip) throw new Error('this browser cannot open compressed links');
       return JSON.parse(new TextDecoder().decode(kind === '1' ? await pipe(bytes, DecompressionStream) : bytes));
     }
-    function payload(st) {
+    function payload(st, extra) {
       const q = Query.q;
-      return {
+      return Object.assign({
         v: 1, name: st.name, dsl: st.draftDsl, tuples: st.tuplesText, assertions: st.assertions || [], queries: st.queries || [],
         q: { type: q.type, user: q.user, relation: q.relation, object: q.object, objectType: q.objectType, userType: q.userType, userRelation: q.userRelation, context: q.context, ctxTuples: q.ctxTuples },
         view: S.ui.graphMode,
-      };
+      }, extra || {});
     }
-    async function link() {
+    async function link(extra) {
       const st = activeStore();
       if (!st) return null;
-      return location.origin + location.pathname + '#s=' + await encode(payload(st));
+      return location.origin + location.pathname + '#s=' + await encode(payload(st, extra));
     }
-    async function copy() {
+    // extra.explain = { user, relation, object, view: 'matrix' | 'data', mx: 'matrix' | 'tree' } opens that
+    // explanation (proof or why-not) on arrival
+    async function copy(extra, label) {
       try {
-        const url = await link();
+        const url = await link(extra);
         if (!url) return;
         const kb = (url.length / 1024).toFixed(1);
-        copyText(url, `Share link (${kb} KB) copied`);
+        copyText(url, `${label || 'Share link'} (${kb} KB) copied`);
         if (url.length > 30000) setTimeout(() => toast('Long link: some chat apps truncate URLs this size — the store JSON export is safer there'), 2800);
       } catch (e) { toast(`Could not build the link: ${e.message}`); }
     }
@@ -58,9 +60,13 @@
         st.sharedKey = key;
         S.stores.push(st);
       }
-      if (p.q && typeof p.q === 'object') st.query = Object.assign({ type: 'check' }, p.q);
-      if (['schema', 'model', 'data', 'matrix'].includes(p.view)) setGraphMode(p.view);
+      const ex = p.explain && typeof p.explain === 'object' && p.explain.user && p.explain.relation && p.explain.object ? p.explain : null;
+      if (ex) st.query = Object.assign({ type: 'check' }, p.q || {}, { type: 'check', user: ex.user, relation: ex.relation, object: ex.object });
+      else if (p.q && typeof p.q === 'object') st.query = Object.assign({ type: 'check' }, p.q);
+      const view = ex ? (ex.view === 'matrix' ? 'matrix' : 'data') : p.view;
+      if (['schema', 'model', 'data', 'matrix'].includes(view)) setGraphMode(view);
       switchStore(st.id);
+      if (ex && view === 'matrix') { S.ui.mxWalk = Object.assign(S.ui.mxWalk || {}, { view: ex.mx === 'tree' ? 'tree' : 'matrix' }); S.ui.matrix = { type: ex.object.split(':')[0], relation: ex.relation }; Matrix.openWalk(ex.user, ex.relation, ex.object); }
       toast(`Opened shared store “${st.name}” — it is saved in this browser like any other store`);
       return true;
     }
@@ -71,7 +77,7 @@
     btn.title = 'Copy a link that opens this store anywhere: model, tuples, assertions and the current query live in the link itself, nothing is uploaded';
     const anchor = $('#btn-write-model');
     anchor.parentNode.insertBefore(btn, anchor.nextSibling);
-    btn.addEventListener('click', copy);
+    btn.addEventListener('click', () => copy());
     window.addEventListener('hashchange', openFromHash);
     openFromHash();
     return { link, copy, openFromHash, encode, decode };

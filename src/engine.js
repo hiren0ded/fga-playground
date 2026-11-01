@@ -1531,6 +1531,74 @@
     fixes.sort((a, b) => (a.action === b.action ? a.depth - b.depth : a.action === 'remove' ? -1 : 1));
     return { root: tree, steps, all, path: best || [], fixes: fixes.slice(0, 8), excludedBy: root.excludedBy || null, reason: root.reason || '' };
   }
+  // Structural lint — what the model alone can tell you: relations nothing could ever satisfy
+  // (no direct assignment reaches them, or they only refer to each other), subject types never
+  // used, tuple-to-userset arrows whose parent types lack the relation.
+  function lintModel(model) {
+    const out = [];
+    if (!model || !model.types.length) return out;
+    const key = (t, r) => `${t}#${r}`;
+    const reach = new Map();
+    for (const t of model.types) for (const r of t.relations) reach.set(key(t.name, r.name), false);
+    const refs = new Map(); // relation → relations it refers to (computed / userset / ttu)
+    const evalReach = (t, n) => {
+      switch (n.kind) {
+        case 'this': return n.types.some((e) => !e.relation || reach.get(key(e.type, e.relation)) === true);
+        case 'computed': return reach.get(key(t.name, n.relation)) === true;
+        case 'ttu': {
+          const ts = t.relMap.get(n.tupleset); if (!ts) return false;
+          return ts.directTypes.some((e) => !e.relation && !e.wildcard && reach.get(key(e.type, n.computed)) === true);
+        }
+        case 'union': return n.children.some((c) => evalReach(t, c));
+        case 'intersection': return n.children.every((c) => evalReach(t, c));
+        case 'difference': return evalReach(t, n.base);
+        default: return false;
+      }
+    };
+    const collect = (t, n, acc) => {
+      switch (n.kind) {
+        case 'this': n.types.forEach((e) => { if (e.relation) acc.add(key(e.type, e.relation)); }); break;
+        case 'computed': acc.add(key(t.name, n.relation)); break;
+        case 'ttu': { const ts = t.relMap.get(n.tupleset); if (ts) ts.directTypes.forEach((e) => { if (!e.relation && !e.wildcard) acc.add(key(e.type, n.computed)); }); break; }
+        case 'union': case 'intersection': n.children.forEach((c) => collect(t, c, acc)); break;
+        case 'difference': collect(t, n.base, acc); collect(t, n.subtract, acc); break;
+        default:
+      }
+    };
+    for (const t of model.types) for (const r of t.relations) { const acc = new Set(); collect(t, r.rewrite, acc); refs.set(key(t.name, r.name), acc); }
+    let changed = true, guard = 0;
+    while (changed && guard++ < 50) { changed = false; for (const t of model.types) for (const r of t.relations) { const k = key(t.name, r.name); if (!reach.get(k) && evalReach(t, r.rewrite)) { reach.set(k, true); changed = true; } } }
+    for (const t of model.types) for (const r of t.relations) {
+      const k = key(t.name, r.name);
+      if (reach.get(k)) continue;
+      const cyc = Array.from(refs.get(k) || []).filter((o) => (refs.get(o) || new Set()).has(k) || o === k);
+      const hasDirect = walkHas(r.rewrite, 'this');
+      const deadBranch = r.rewrite.kind === 'intersection' ? r.rewrite.children.find((c) => !evalReach(t, c)) : null;
+      let why;
+      if (deadBranch) why = `it is an intersection and its branch "${describeRewrite(deadBranch, false)}" can never be satisfied`;
+      else if (cyc.length) why = `it refers to ${cyc.join(', ')} which refers back to it, and no direct assignment breaks the cycle`;
+      else if (hasDirect) why = 'its only direct subjects are usersets that can never be satisfied themselves';
+      else why = `no direct assignment reaches it through ${Array.from(refs.get(k) || []).join(', ') || 'its definition'}`;
+      out.push({ kind: 'unreachable', line: r.line, relation: k, message: `${k} can never be satisfied: ${why}` });
+    }
+    // subject types never used
+    const usedTypes = new Set();
+    for (const t of model.types) for (const r of t.relations) for (const e of r.directTypes) usedTypes.add(e.type);
+    for (const t of model.types) if (!t.relations.length && !usedTypes.has(t.name)) out.push({ kind: 'unused-type', line: t.line, type: t.name, message: `type ${t.name} has no relations and no relation accepts it as a subject` });
+    // tuple-to-userset arrows whose parent types lack the computed relation
+    for (const t of model.types) for (const r of t.relations) walkRewrite(r.rewrite, (n) => {
+      if (n.kind !== 'ttu') return;
+      const ts = t.relMap.get(n.tupleset);
+      if (!ts) return;
+      const parents = ts.directTypes.filter((e) => !e.relation && !e.wildcard).map((e) => e.type);
+      const missing = parents.filter((p) => { const pt = model.typeMap.get(p); return !pt || !pt.relMap.has(n.computed); });
+      if (parents.length && missing.length === parents.length) out.push({ kind: 'ttu-dead', line: r.line, relation: key(t.name, r.name), message: `${key(t.name, r.name)}: "${n.computed} from ${n.tupleset}" can never apply — ${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no relation ${n.computed}` });
+      else if (missing.length) out.push({ kind: 'ttu-partial', line: r.line, relation: key(t.name, r.name), message: `${key(t.name, r.name)}: "${n.computed} from ${n.tupleset}" skips ${missing.join(', ')} (no relation ${n.computed} there)` });
+      if (!parents.length) out.push({ kind: 'ttu-dead', line: r.line, relation: key(t.name, r.name), message: `${key(t.name, r.name)}: "${n.computed} from ${n.tupleset}" can never apply — ${n.tupleset} accepts no plain object type` });
+    });
+    return out;
+  }
+  function walkHas(n, kind) { let f = false; walkRewrite(n, (x) => { if (x.kind === kind) f = true; }); return f; }
   function chainText(chain) {
     const parts = [];
     chain.segments.forEach((sg, i) => {
@@ -1573,7 +1641,7 @@
     parseDSL, parseRewrite, describeRewrite, describeEntry, walkRewrite,
     modelToJSON, ulid, modelEdges, buildModelGraph, buildDataGraph,
     parseUserRef, parseObjectRef, parseTupleLine, parseTuples, validateTuple, tupleKey, formatTuple, arrowTuple,
-    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofTree, proofSteps, explainDenial, chainText,
+    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofTree, proofSteps, explainDenial, lintModel, chainText,
     evaluateCondition, CEL,
   };
 });

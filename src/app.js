@@ -237,13 +237,16 @@ user:* viewer document:readme
     if (!S.parsed.errors.length && S.model.types.length) S.lastGoodModel = S.model;
     S.effectiveModel = S.parsed.errors.length || !S.model.types.length ? S.lastGoodModel : S.model;
     dslEditor.setMarks(S.parsed.errors.map((e) => e.line), S.parsed.warnings.map((w) => w.line));
-    renderDiags($('#dsl-diags'), S.parsed.errors, S.parsed.warnings, dslEditor, S.model.types.length ? `Model OK — ${S.model.types.length} type${S.model.types.length === 1 ? '' : 's'}, ${S.model.types.reduce((n, t) => n + t.relations.length, 0)} relations${S.model.conditions.length ? ', ' + S.model.conditions.length + ' condition' + (S.model.conditions.length === 1 ? '' : 's') : ''}` : '');
     $('#dsl-meta').textContent = `schema ${S.model.schema || '1.1'} · ${st.draftDsl.split('\n').length} lines`;
 
     S.tuplesParsed = FGA.parseTuples(S.timeTravel ? S.timeTravel.text : st.tuplesText, S.effectiveModel);
     S.ctxTuples = FGA.parseTuples(Query.getCtxTuplesText(), S.effectiveModel, { contextual: true });
     const all = S.tuplesParsed.tuples.concat(S.ctxTuples.tuples);
     S.store = FGA.buildStore(all);
+    runLint();
+    dslEditor.setMarks(S.parsed.errors.map((e) => e.line), S.parsed.warnings.map((w) => w.line).concat((S.lint || []).filter((l) => l.sev === 'warn').map((l) => l.line)));
+    renderDiags($('#dsl-diags'), S.parsed.errors, S.parsed.warnings, dslEditor, S.model.types.length ? `Model OK — ${S.model.types.length} type${S.model.types.length === 1 ? '' : 's'}, ${S.model.types.reduce((n, t) => n + t.relations.length, 0)} relations${S.model.conditions.length ? ', ' + S.model.conditions.length + ' condition' + (S.model.conditions.length === 1 ? '' : 's') : ''}` : '', S.lint);
+    renderHealth();
     NodeMenu.close();
     tuplesEditor.setMarks(S.tuplesParsed.errors.map((e) => e.line), S.tuplesParsed.rejected.map((r) => r.line));
     renderDiags($('#tuples-diags'), S.tuplesParsed.errors, S.tuplesParsed.rejected.map((r) => ({ line: r.line, message: `rejected: ${r.message}` })), tuplesEditor, '');
@@ -317,10 +320,31 @@ user:* viewer document:readme
     $('#tt-range').addEventListener('input', (e) => setTimeTravel(+e.target.value));
     $('#tt-now').addEventListener('click', () => setTimeTravel(null));
   }
-  function renderDiags(el, errors, warnings, editor, okText) {
+  function renderDiags(el, errors, warnings, editor, okText, lints = []) {
     const items = [...errors.map((e) => ({ ...e, kind: 'err' })), ...warnings.map((w) => ({ ...w, kind: 'warn' }))].sort((a, b) => a.line - b.line);
-    el.innerHTML = items.map((d) => `<div class="diag ${d.kind}" data-line="${d.line}"><span class="ln">L${d.line}</span><span>${esc(d.message)}</span></div>`).join('') + (okText && !items.length ? `<div class="diag ok"><span class="ln">✓</span><span>${esc(okText)}</span></div>` : '');
-    $$('.diag[data-line]', el).forEach((d) => d.addEventListener('click', () => editor.scrollToLine(+d.dataset.line)));
+    const lintItems = lints.slice().sort((a, b) => (a.sev === b.sev ? a.line - b.line : a.sev === 'warn' ? -1 : 1));
+    el.innerHTML = items.map((d) => `<div class="diag ${d.kind}" data-line="${d.line}"><span class="ln">L${d.line}</span><span>${esc(d.message)}</span></div>`).join('') + (okText && !items.length ? `<div class="diag ok"><span class="ln">✓</span><span>${esc(okText)}</span></div>` : '')
+      + lintItems.map((d) => `<div class="diag lint ${d.sev}" data-line="${d.line}"${d.relation ? ` data-rel="${esc(d.type)}#${esc(d.relation)}"` : ''}><span class="ln">${d.sev === 'warn' ? '⚠' : 'ℹ'} L${d.line}</span><span>${esc(d.message)}</span>${d.relation && d.type && (d.kind === 'nobody' || d.kind === 'excluded' || d.kind === 'unused-direct') ? `<button class="btn xs ghost" data-matrix="${esc(d.type)}|${esc(d.relation)}">matrix</button>` : ''}</div>`).join('');
+    $$('.diag[data-line]', el).forEach((d) => d.addEventListener('click', (ev) => { if (ev.target.closest('button')) return; editor.scrollToLine(+d.dataset.line); }));
+    $$('.diag button[data-matrix]', el).forEach((b) => b.addEventListener('click', () => { const [t, r] = b.dataset.matrix.split('|'); Matrix.show(t, r); }));
+  }
+  // health strip on the Schema view: a summary of the lint, expandable into the list
+  function renderHealth() {
+    const el = $('#health-bar'); if (!el) return;
+    const lint = S.lint || [];
+    const groups = [
+      { k: 'unreachable', label: 'can never be satisfied', sev: 'warn', items: lint.filter((l) => l.kind === 'unreachable' || l.kind === 'ttu-dead') },
+      { k: 'nobody', label: 'held by nobody in this store', sev: 'warn', items: lint.filter((l) => l.kind === 'nobody') },
+      { k: 'excluded', label: 'emptied by a "but not"', sev: 'warn', items: lint.filter((l) => l.kind === 'excluded') },
+      { k: 'unused', label: 'unused', sev: 'hint', items: lint.filter((l) => l.kind === 'unused-type' || l.kind === 'unused-direct' || l.kind === 'ttu-partial') },
+    ].filter((g) => g.items.length);
+    const open = S.ui.healthOpen;
+    el.hidden = Graph.mode !== 'schema';
+    if (!lint.length) { el.innerHTML = `<span class="hb-ok">✓ model health: nothing to flag${S.store && S.store.tuples.length ? '' : ' (add tuples to lint the store too)'}</span>`; return; }
+    el.innerHTML = `<span class="hb-k">model health</span>${groups.map((g) => `<button class="hb-chip ${g.sev}${open === g.k ? ' on' : ''}" data-k="${g.k}"><b>${g.items.length}</b>${esc(g.label)}</button>`).join('')}${open ? `<div class="hb-list">${(groups.find((g) => g.k === open) || { items: [] }).items.map((d) => `<div class="hb-item"><span>${esc(d.message)}</span><span class="hb-acts"><button class="btn xs ghost" data-line="${d.line}">L${d.line}</button>${d.relation && d.type && d.kind !== 'unreachable' && d.kind !== 'ttu-dead' && d.kind !== 'ttu-partial' ? `<button class="btn xs ghost" data-matrix="${esc(d.type)}|${esc(d.relation)}">matrix</button>` : ''}</span></div>`).join('')}</div>` : ''}`;
+    $$('.hb-chip', el).forEach((b) => b.addEventListener('click', () => { S.ui.healthOpen = S.ui.healthOpen === b.dataset.k ? null : b.dataset.k; renderHealth(); }));
+    $$('.hb-item button[data-line]', el).forEach((b) => b.addEventListener('click', () => { setEditorTab('dsl'); dslEditor.scrollToLine(+b.dataset.line, true); }));
+    $$('.hb-item button[data-matrix]', el).forEach((b) => b.addEventListener('click', () => { const [t, r] = b.dataset.matrix.split('|'); Matrix.show(t, r); }));
   }
   function refreshDatalists() {
     const users = new Set(S.store.allUsers());
@@ -380,7 +404,65 @@ user:* viewer document:readme
       });
     }
     function text(steps) { return steps.map((st) => `${st.n}. ${st.ok === false || st.excluded ? '✕ ' : ''}${st.text}`).join('\n'); }
-    return { stepsHtml, wire, text };
+    // Everything needed to explain one Check: verdict, steps in the current order and in flow order
+    // (for the sentence), fixes for a denial. q = { user, relation, object, context }
+    function explain(q) {
+      const m = S.effectiveModel, st = S.store;
+      if (!m || !st) return null;
+      let res;
+      try { res = FGA.check(m, st, { user: q.user, relation: q.relation, object: q.object, context: q.context || {} }); } catch (e) { return null; }
+      if (res.error && !res.root) return { q, allowed: false, error: res.error, steps: [], flow: [], fixes: [] };
+      if (res.allowed && res.root && res.root.proof) return { q, allowed: true, steps: FGA.proofSteps(res.root.proof, Graph.proofOrder), flow: FGA.proofSteps(res.root.proof, 'flow'), fixes: [] };
+      const d = FGA.explainDenial(m, st, q, res, Graph.proofOrder), f = FGA.explainDenial(m, st, q, res, 'flow');
+      return { q, allowed: false, steps: d ? d.steps : [], flow: f ? f.steps : [], fixes: d ? d.fixes : [], excludedBy: d && d.excludedBy, reason: (res.root && res.root.reason) || res.error || '' };
+    }
+    const rulePhrase = (s, goalObj) => s.kind === 'computed' ? `${s.implied} ⇒ ${s.relation}${s.object !== goalObj ? ` on ${s.object}` : ''}` : s.kind === 'ttu' ? `${s.computed} of ${s.parent} ⇒ ${s.relation} of ${s.object} ("${s.computed} from ${s.tupleset}")` : '';
+    const bad = (s) => s.ok === false || s.excluded;
+    // one paragraph of plain English, built from the flow-order steps
+    function sentence(x) {
+      if (!x) return '';
+      const { user, relation, object } = x.q;
+      if (x.error) return `${user} cannot be checked for ${relation} on ${object}: ${x.error}.`;
+      if (x.allowed) {
+        const facts = x.flow.filter((s) => s.kind === 'tuple').map((s) => s.text);
+        const rules = x.flow.filter((s) => s.kind === 'computed' || s.kind === 'ttu').map((s) => rulePhrase(s, object));
+        const not = x.flow.find((s) => s.kind === 'not');
+        if (!rules.length && facts.length === 1) return `${user} is ${relation} of ${object} directly: a tuple says so (${facts[0]}).`;
+        return `${user} is ${relation} of ${object} because ${facts.join('; ')}${rules.length ? `. The model carries that through ${rules.join(', then ')}` : ''}${not ? `, and ${user} is not in the "${not.text.replace(/^and not /, '')}" exclusion` : ''}.`;
+      }
+      const fixAdd = x.fixes.filter((f) => f.action === 'add'), fixRm = x.fixes.filter((f) => f.action === 'remove');
+      if (x.excludedBy) {
+        const base = x.flow.filter((s) => s.kind === 'tuple' && !bad(s)).map((s) => s.text);
+        const ex = x.flow.filter((s) => s.kind === 'tuple' && s.excluded).map((s) => s.text);
+        return `${user} would be ${relation} of ${object}${base.length ? ` (${base.join('; ')})` : ''}, but "but not ${x.excludedBy}" takes it away${ex.length ? `: ${ex.join('; ')}` : ''}.${fixRm.length ? ` Removing \`${fixRm[0].text}\` would restore it.` : ''}`;
+      }
+      const path = x.flow.filter((s) => s.onPath || s.n != null);
+      const miss = path.find((s) => bad(s) && (s.kind === 'direct' || s.kind === 'noparent'));
+      const rules = path.filter((s) => s.kind === 'computed' || s.kind === 'ttu');
+      const links = path.filter((s) => s.kind === 'tuple' && !bad(s)).map((s) => s.text);
+      let out = `${user} is not ${relation} of ${object}.`;
+      if (miss) {
+        const start = miss.kind === 'direct' ? `${miss.relation} on ${miss.object}` : `a ${miss.tupleset} of ${miss.object}`;
+        const chain = rules.map((s) => s.kind === 'computed' ? s.relation + (s.object !== miss.object && s.object !== object ? ` on ${s.object}` : '') : `${s.relation} on ${s.object} (${s.computed} from ${s.tupleset})`);
+        out += ` The closest route is ${[start].concat(chain).join(' ⇒ ')}${links.length ? `, through ${links.join('; ')}` : ''}. It breaks at the first link: ${miss.kind === 'direct' ? `${user} holds no ${miss.relation} on ${miss.object}` : `${miss.object} has no ${miss.tupleset}`}.`;
+        const best = fixAdd.find((f) => f.object === miss.object && f.relation === miss.relation) || fixAdd[0];
+        if (best) out += ` Adding \`${best.text}\` would fix it${fixAdd.length > 1 ? ` (or one of ${fixAdd.length - 1} other tuple${fixAdd.length === 2 ? '' : 's'} listed below)` : ''}.`;
+        else out += ' No single tuple would flip it.';
+      } else if (x.reason) out += ` ${x.reason.replace(/^.*?( — )/, '')}.`;
+      return out;
+    }
+    function markdown(x) {
+      if (!x) return '';
+      const { user, relation, object } = x.q;
+      const head = `### ${x.allowed ? '✅ Allowed' : '❌ Denied'} — \`${user}\` ${relation} \`${object}\``;
+      const list = x.steps.map((s) => `${s.n}. ${bad(s) ? '✕ ' : ''}${s.text}${s.why ? ` — _${s.why}_` : ''}`).join('\n');
+      const fixes = !x.allowed && x.fixes.length ? `\n\n**Would pass with**\n${x.fixes.map((f) => `- ${f.action === 'add' ? 'add' : 'remove'} \`${f.text}\``).join('\n')}` : '';
+      const order = Graph.proofOrder === 'check' ? 'numbered in Check order, from the object down to the subject' : 'numbered in access-flow order, from the subject up to the object';
+      return `${head}\n\n${sentence(x)}\n\n${list ? `${list}\n\n_Steps ${order}._` : ''}${fixes}\n`;
+    }
+    function copyMarkdown(q) { const x = explain(q); if (x) copyText(markdown(x), 'Explanation (markdown)'); }
+    function shareLink(q, view, mx) { return Share.copy({ explain: { user: q.user, relation: q.relation, object: q.object, view, mx } }, 'Link to this explanation'); }
+    return { stepsHtml, wire, text, explain, sentence, markdown, copyMarkdown, shareLink };
   })();
   const Query = (() => {
     const fieldsEl = $('#q-fields');
@@ -548,13 +630,23 @@ user:* viewer document:readme
         const whyNot = !res.allowed && den ? `<div class="why-not"><div class="wn-head"><span class="pb-k no">why not</span><span>${den.excludedBy ? `the access is there, but <code>but not ${esc(den.excludedBy)}</code> takes it away` : steps.length > 1 ? 'the branch that got furthest, and where it stopped' : esc(why)}</span></div>${Proof.stepsHtml(steps)}<div class="wn-fixes">${den.fixes.length ? `<span class="lbl">would pass with</span>${den.fixes.map(fixHtml).join('')}` : `<span class="lbl">no single tuple would flip this</span><span class="sub">${esc(why)}</span>`}</div></div>` : '';
         el.innerHTML = `<div class="answer ${res.allowed ? 'ok' : 'fail'}">
           <div class="ans-head"><span class="ans-verdict">${res.allowed ? 'Allowed' : 'Denied'}</span><span class="ans-text"><code>${esc(r.q.user)}</code> ${res.allowed ? 'is' : 'is not'} ${article(r.q.relation)} ${rel} of <code>${esc(r.q.object)}</code></span></div>
+          <div class="ans-sentence" id="res-sentence"></div>
           ${res.allowed ? `<div class="proof">${Proof.stepsHtml(steps)}<div class="proof-hint">${steps.length} step${steps.length === 1 ? '' : 's'} · the same numbers sit on the data graph and in the matrix · hover to flash, click to go there</div></div>` : whyNot || (why ? `<div class="ans-why">${esc(why)}</div>` : '')}
           ${meta}
           <div class="ans-actions"><button class="btn sm" id="res-step">Explain step by step</button><button class="btn sm ghost" id="res-assert">+ Assertion</button>${res.allowed && chains.length ? '<button class="btn sm ghost" id="res-copy">Copy proof</button><button class="btn sm ghost" id="res-zoom" title="Frame the proof path in the data graph">Zoom to path</button>' : ''}</div>
         </div>`;
         $('#res-assert').addEventListener('click', () => Assertions.add({ user: r.q.user, relation: r.q.relation, object: r.q.object, context: Object.keys(r.q.contextObj).length ? r.q.contextObj : undefined, expected: res.allowed }));
         const zp = $('#res-zoom'); if (zp) zp.addEventListener('click', () => { if (Graph.mode !== 'data') setGraphMode('data'); Graph.clearFocus(); setTimeout(() => Graph.fitToHighlighted(true), 60); });
-        const cp = $('#res-copy'); if (cp) cp.addEventListener('click', () => copyText(`${r.q.user} ${r.q.relation} ${r.q.object}: ALLOWED\n` + Proof.text(steps), 'Proof'));
+        const xq = { user: r.q.user, relation: r.q.relation, object: r.q.object, context: r.q.contextObj };
+        const xd = (res.allowed || den) ? Proof.explain(xq) : null;
+        if (xd) $('#res-sentence').textContent = Proof.sentence(xd); else $('#res-sentence').remove();
+        const acts = $('.ans-actions', el);
+        if (acts && xd) {
+          const cpRes = $('#res-copy'); if (cpRes) cpRes.remove();
+          acts.insertAdjacentHTML('beforeend', `<button class="btn sm ghost" id="res-md" title="Copy the sentence, the numbered steps${res.allowed ? '' : ' and the fixes'} as markdown — for tickets and reviews">Copy as markdown</button><button class="btn sm ghost" id="res-share" title="Copy a link that opens this store with this explanation">Share explanation</button>`);
+          $('#res-md').addEventListener('click', () => copyText(Proof.markdown(xd), 'Explanation (markdown)'));
+          $('#res-share').addEventListener('click', () => Proof.shareLink(xq, Graph.mode === 'matrix' ? 'matrix' : 'data'));
+        }
         Proof.wire(el, steps);
         $$('.why-not [data-fix]', el).forEach((b) => b.addEventListener('click', () => {
           const f = den.fixes[+b.dataset.fix]; if (!f) return;
@@ -994,12 +1086,27 @@ user:* viewer document:readme
     persist();
   }
   $$('#pane-editor .pane-tabs button').forEach((b) => b.addEventListener('click', () => setEditorTab(b.dataset.tab)));
+  // Who holds (object, relation) for one subject type — ListUsers, memoised per model × store so the
+  // derived toggle, the matrix and the lint share the work.
+  const accessCache = new WeakMap();
+  function accessFor(m, st, obj, rel, ut) {
+    let byStore = accessCache.get(m); if (!byStore) { byStore = new WeakMap(); accessCache.set(m, byStore); }
+    let map = byStore.get(st); if (!map) { map = new Map(); byStore.set(st, map); }
+    const k = `${obj}|${rel}|${ut}`;
+    let v = map.get(k);
+    if (!v) {
+      const res = FGA.listUsers(m, st, { object: obj, relation: rel, userType: ut, context: {} });
+      v = res.error ? { users: [], wildcard: false, excluded: [], error: res.error } : { users: res.users, wildcard: res.wildcard, excluded: res.excluded };
+      map.set(k, v);
+    }
+    return v;
+  }
+  function subjectTypesOf(m) { const out = new Set(); m.types.forEach((t) => t.relations.forEach((r) => r.directTypes.forEach((e) => { if (!e.relation) out.add(e.type); }))); return Array.from(out); }
   // Materialised access for the data view: every (user, relation, object) that Check would allow but
-  // no tuple states directly — one ListUsers per userset slot per plain subject type.
+  // no tuple states directly.
   function computeDerived() {
     const m = S.effectiveModel, st = S.store; if (!m || !st) return [];
-    const userTypes = new Set();
-    m.types.forEach((t) => t.relations.forEach((r) => r.directTypes.forEach((e) => { if (!e.relation) userTypes.add(e.type); })));
+    const userTypes = subjectTypesOf(m);
     const direct = new Set(st.tuples.map((t) => `${t.user.raw}|${t.relation}|${t.object.raw}`));
     const out = [];
     let calls = 0;
@@ -1007,13 +1114,56 @@ user:* viewer document:readme
       const t = m.typeMap.get(obj.split(':')[0]); if (!t) continue;
       for (const r of t.relations) for (const ut of userTypes) {
         if (++calls > 1500) { toast('Derived access: the store is too large to materialise everything, showing a partial view'); return out; }
-        const res = FGA.listUsers(m, st, { object: obj, relation: r.name, userType: ut, context: {} });
+        const res = accessFor(m, st, obj, r.name, ut);
         if (res.error) continue;
         res.users.forEach((u) => { if (!direct.has(`${u}|${r.name}|${obj}`)) out.push({ user: u, relation: r.name, object: obj }); });
         if (res.wildcard && !direct.has(`${ut}:*|${r.name}|${obj}`)) out.push({ user: `${ut}:*`, relation: r.name, object: obj, wildcard: true });
       }
     }
     return out;
+  }
+  // Store lint — what the model + this store say together: relations nobody holds on any object,
+  // exclusions that remove every would-be holder, direct types no tuple ever uses.
+  function lintStore(m, st) {
+    const out = [];
+    if (!m || !st || !st.tuples.length) return out;
+    const uts = subjectTypesOf(m);
+    let calls = 0;
+    for (const t of m.types) {
+      if (!t.relations.length) continue;
+      const objs = st.objectsOfType(t.name);
+      if (!objs.length) continue;
+      for (const r of t.relations) {
+        const k = `${t.name}#${r.name}`;
+        let holders = 0, excludedObjs = 0;
+        for (const obj of objs) {
+          let any = false, ex = 0;
+          for (const ut of uts) { if (++calls > 2500) return out; const v = accessFor(m, st, obj, r.name, ut); if (v.users.length || v.wildcard) any = true; ex += v.excluded.length; }
+          if (any) holders++; else if (ex) excludedObjs++;
+        }
+        const n = objs.length;
+        if (!holders) {
+          const why = r.rewrite.kind === 'intersection' ? ' — it is an intersection and no subject satisfies all its branches on the same object' : excludedObjs ? ` — everyone who would hold it is excluded by "but not ${FGA.describeRewrite(r.rewrite.subtract, false)}"` : r.directTypes.length ? ' — no tuple assigns it and nothing implies it' : ' — nothing implies it here';
+          out.push({ kind: 'nobody', sev: 'warn', line: r.line, type: t.name, relation: r.name, message: `${k}: nobody holds it on any of the ${n} ${t.name} object${n === 1 ? '' : 's'}${why}` });
+        } else if (excludedObjs) {
+          out.push({ kind: 'excluded', sev: 'warn', line: r.line, type: t.name, relation: r.name, message: `${k}: on ${excludedObjs} of ${n} ${t.name} object${n === 1 ? '' : 's'} everyone who would hold it is excluded by "but not ${FGA.describeRewrite(r.rewrite.subtract, false)}"` });
+        }
+        if (r.directTypes.length) {
+          const used = (e) => st.tuples.some((tp) => tp.object.type === t.name && tp.relation === r.name && tp.user.type === e.type && !!tp.user.wildcard === !!e.wildcard && (tp.user.relation || null) === (e.relation || null));
+          const unused = r.directTypes.filter((e) => !used(e));
+          if (unused.length === r.directTypes.length) out.push({ kind: 'unused-direct', sev: 'hint', line: r.line, type: t.name, relation: r.name, message: `${k}: no tuple assigns it directly (it accepts ${r.directTypes.map(FGA.describeEntry).join(', ')})` });
+          else if (unused.length) out.push({ kind: 'unused-direct', sev: 'hint', line: r.line, type: t.name, relation: r.name, message: `${k}: no tuple uses ${unused.map(FGA.describeEntry).join(', ')}` });
+        }
+      }
+    }
+    return out;
+  }
+  function runLint() {
+    const m = S.effectiveModel, st = S.store;
+    const structural = m && !S.parsed.errors.length ? FGA.lintModel(m).map((l) => Object.assign({ sev: l.kind === 'unreachable' || l.kind === 'ttu-dead' ? 'warn' : 'hint' }, l)) : [];
+    const store = m && !S.parsed.errors.length ? lintStore(m, st) : [];
+    S.lint = structural.concat(store);
+    return S.lint;
   }
   // ── access matrix: subjects × objects for one relation, direct vs derived, diffed against a written model
   const Matrix = (() => {
@@ -1090,8 +1240,13 @@ user:* viewer document:readme
     // the walk as a tree: Check's recursion, one indented line per step
     function walkTreeHtml() {
       const { root } = walkData(Graph.proofOrder);
+      // branches with no numbered step inside were tried and abandoned: fold them per parent
+      const numbered = (n) => (n.step && n.step.n != null) || n.children.some(numbered);
       const node = (n, depth) => {
-        const kids = n.children.map((c) => node(c, depth + (n.step ? 1 : 0))).join('');
+        const d1 = depth + (n.step ? 1 : 0);
+        const live = walk.denial ? n.children.filter(numbered) : n.children, dead = walk.denial ? n.children.filter((c) => !numbered(c)) : [];
+        const deadSteps = (c) => (c.step ? 1 : 0) + c.children.reduce((a, k) => a + deadSteps(k), 0);
+        const kids = live.map((c) => node(c, d1)).join('') + (dead.length ? `<details class="pt-more" style="--d:${d1}"><summary>${dead.length} other branch${dead.length === 1 ? '' : 'es'} tried · ${dead.reduce((a, c) => a + deadSteps(c), 0)} step${dead.reduce((a, c) => a + deadSteps(c), 0) === 1 ? '' : 's'}</summary>${dead.map((c) => node(c, d1)).join('')}</details>` : '');
         if (!n.step) return kids;
         const st = n.step;
         const bad = st.ok === false || st.excluded;
@@ -1108,9 +1263,9 @@ user:* viewer document:readme
       const w = wsel();
       const d = walkData(Graph.proofOrder);
       const n = d.steps.length;
-      return `<div class="mx-walk${walk.denial ? ' denial' : ''}" id="mx-walk"><div class="mw-head"><span class="pb-title"><span class="pb-k${walk.denial ? ' no' : ''}">${walk.denial ? 'why not' : 'proof'}</span>${esc(walk.user)} ${esc(walk.rel)} ${esc(walk.obj)}<span class="pb-hint">${n} steps${walk.denial && d.excludedBy ? ` · excluded by "but not ${esc(d.excludedBy)}"` : walk.denial ? ' · the branch that got furthest' : ''}</span></span><span class="lbl">view</span><div class="seg xs" id="mw-view"><button data-v="matrix" aria-pressed="${w.view !== 'tree'}">matrix</button><button data-v="tree" aria-pressed="${w.view === 'tree'}">tree</button></div><span class="lbl">order</span><div class="seg xs" id="mw-order"><button data-o="check" aria-pressed="${Graph.proofOrder === 'check'}">Check ↓</button><button data-o="flow" aria-pressed="${Graph.proofOrder === 'flow'}">flow ↑</button></div>${w.view !== 'tree' ? `<span class="lbl">rows</span><div class="seg xs" id="mw-rows"><button data-r="all" aria-pressed="${w.rows !== 'users'}">all</button><button data-r="users" aria-pressed="${w.rows === 'users'}">users only</button></div>` : ''}<button class="btn sm" id="mw-graph" title="Open this walk on the data graph">show on graph ↗</button><button class="btn sm ghost icon" id="mw-close" title="Close">×</button></div>${w.view === 'tree' ? walkTreeHtml() : walkMatrixHtml()}${walkFixesHtml(d)}</div>`;
+      return `<div class="mx-walk${walk.denial ? ' denial' : ''}" id="mx-walk"><div class="mw-head"><span class="pb-title"><span class="pb-k${walk.denial ? ' no' : ''}">${walk.denial ? 'why not' : 'proof'}</span>${esc(walk.user)} ${esc(walk.rel)} ${esc(walk.obj)}<span class="pb-hint">${n} steps${walk.denial && d.excludedBy ? ` · excluded by "but not ${esc(d.excludedBy)}"` : walk.denial ? ' · the branch that got furthest' : ''}</span></span><span class="lbl">view</span><div class="seg xs" id="mw-view"><button data-v="matrix" aria-pressed="${w.view !== 'tree'}">matrix</button><button data-v="tree" aria-pressed="${w.view === 'tree'}">tree</button></div><span class="lbl">order</span><div class="seg xs" id="mw-order"><button data-o="check" aria-pressed="${Graph.proofOrder === 'check'}">Check ↓</button><button data-o="flow" aria-pressed="${Graph.proofOrder === 'flow'}">flow ↑</button></div>${w.view !== 'tree' ? `<span class="lbl">rows</span><div class="seg xs" id="mw-rows"><button data-r="all" aria-pressed="${w.rows !== 'users'}">all</button><button data-r="users" aria-pressed="${w.rows === 'users'}">users only</button></div>` : ''}<button class="btn sm ghost" id="mw-md" title="Copy the sentence and numbered steps as markdown">copy md</button><button class="btn sm ghost" id="mw-share" title="Copy a link that opens this explanation">share</button><button class="btn sm" id="mw-graph" title="Open this walk on the data graph">show on graph ↗</button><button class="btn sm ghost icon" id="mw-close" title="Close">×</button></div><div class="ans-sentence">${esc(Proof.sentence(Proof.explain({ user: walk.user, relation: walk.rel, object: walk.obj })))}</div>${w.view === 'tree' ? walkTreeHtml() : walkMatrixHtml()}${walkFixesHtml(d)}</div>`;
     }
-    function subjectTypes(m) { const out = new Set(); m.types.forEach((t) => t.relations.forEach((r) => r.directTypes.forEach((e) => { if (!e.relation) out.add(e.type); }))); return Array.from(out); }
+    const subjectTypes = subjectTypesOf;
     // one cell state per (subject, object): direct | derived | public | excluded | ''
     function compute(m, st, type, relation) {
       const objects = st.objectsOfType(type);
@@ -1118,7 +1273,7 @@ user:* viewer document:readme
       const direct = new Set(st.tuples.map((t) => `${t.user.raw}|${t.relation}|${t.object.raw}`));
       const cells = new Map(), wild = new Map();
       for (const obj of objects) for (const ut of uts) {
-        const res = FGA.listUsers(m, st, { object: obj, relation, userType: ut, context: {} });
+        const res = accessFor(m, st, obj, relation, ut);
         if (res.error) continue;
         res.users.forEach((u) => cells.set(`${u}|${obj}`, direct.has(`${u}|${relation}|${obj}`) ? 'direct' : 'derived'));
         res.excluded.forEach((u) => { if (!cells.has(`${u}|${obj}`)) cells.set(`${u}|${obj}`, 'excluded'); });
@@ -1219,6 +1374,8 @@ user:* viewer document:readme
       $$('#mw-order button', w).forEach((b) => b.addEventListener('click', () => { Graph.setProofOrder(b.dataset.o); render(); }));
       $$('#mw-rows button', w).forEach((b) => b.addEventListener('click', () => { wsel().rows = b.dataset.r; persist(); render(); }));
       $('#mw-graph', w).addEventListener('click', () => toGraph(walk.user, walk.rel, walk.obj));
+      $('#mw-md', w).addEventListener('click', () => Proof.copyMarkdown({ user: walk.user, relation: walk.rel, object: walk.obj }));
+      $('#mw-share', w).addEventListener('click', () => Proof.shareLink({ user: walk.user, relation: walk.rel, object: walk.obj }, 'matrix', wsel().view));
       $('#mw-close', w).addEventListener('click', closeWalk);
       $$('.wn-fixes [data-fix]', w).forEach((b) => b.addEventListener('click', () => { const d = walkData(Graph.proofOrder); const f = d.fixes[+b.dataset.fix]; if (!f) return; if (b.dataset.do === 'write') writeTupleLine(f.text); else if (b.dataset.do === 'delete' && f.line != null) deleteTupleLines([f.line]); }));
       $$('.mw-chip[data-n], .pt-row', w).forEach((c) => {
@@ -1252,7 +1409,8 @@ user:* viewer document:readme
       if (y + tip.offsetHeight > r.height - 8) y = Math.max(8, ev.clientY - r.top - tip.offsetHeight - 10);
       tip.style.left = x + 'px'; tip.style.top = y + 'px';
     }
-    return { render };
+    function show(type, relation) { sel().type = type; sel().relation = relation; persist(); setGraphMode('matrix'); }
+    return { render, show, openWalk, get walk() { return walk ? { user: walk.user, relation: walk.rel, object: walk.obj } : null; } };
   })();
   Graph.on('renderMatrix', () => Matrix.render());
   const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: tuples as edges into object#relation slots — objects the query walked open as cards', matrix: 'matrix: who holds which relation on which object — direct tuples, derived access, public grants and exclusions; click a cell to Check it' };
@@ -1270,6 +1428,7 @@ user:* viewer document:readme
     $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = m === 'matrix' || ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
     $('#find-wrap').hidden = m === 'matrix';
+    const hb = $('#health-bar'); if (hb) hb.hidden = m !== 'schema';
   }
   function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
@@ -1578,6 +1737,7 @@ user:* viewer document:readme
   Graph.on('blankClick', () => { NodeMenu.close(); CtxMenu.close(); if (!Graph.multiSelecting) Graph.clearFocus(); Graph.clearProof(); });
   Graph.on('proofBack', (where) => { if (where === 'matrix') setGraphMode('matrix'); });
   Graph.on('proofOrder', (o) => { S.ui.proofOrder = o; persist(); });
+  Graph.on('proofCopy', (title) => { const [user, relation, object] = String(title || '').split(' '); if (user && relation && object) Proof.copyMarkdown({ user, relation, object, context: Query.contextObj() }); });
 
   // ── layout: collapsible panes, resizable widths, focus mode
   function applyLayout() {
@@ -1732,6 +1892,6 @@ user:* viewer document:readme
     document.fonts && document.fonts.ready.then(() => { Graph.setMode(S.ui.graphMode); });
   }
   boot();
-  window.__fga = { Graph };
+  window.__fga = { Graph, get S() { return S; } };
 /*__SHARE__*/
 })();
