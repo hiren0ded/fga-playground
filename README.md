@@ -105,7 +105,8 @@ from the site itself. Static page sources live in `src/site/`.
   ports and orthogonal edge routing; dagre elsewhere and as the fallback. → / ↓ force dagre.
 - **Stable layout:** small edits keep existing nodes (and their edge routes) where they were; new
   nodes are placed by the fresh layout, shifted into the old frame and nudged clear of overlaps.
-  *Tidy layout* (⋯ menu) and *Reset* lay out afresh.
+  *Tidy layout* (⋯ menu) and *Reset* lay out afresh; Reset also puts dragged nodes back (with Undo).
+  *Clear highlights, keep layout* (⋯ menu, or Esc) clears the walk and focus without moving anything.
 - **Big stores** (over 60 nodes): the data view shows the query's neighbourhood (two hops, `+N`
   handles to expand) or, without a query, one node per type (`+` expands). *Data view shows* in the
   ⋯ menu and the pill at the bottom switch between auto / all / near / by type.

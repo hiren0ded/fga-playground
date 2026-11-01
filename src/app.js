@@ -98,7 +98,8 @@ user:* viewer document:readme
     { sel: '#q-adv-toggle', name: 'context', does: 'Request context for conditions, and contextual tuples used only for this query.', no: 'Contextual tuples are never saved into the store.' },
     { sel: '#btn-connect', name: 'connect', does: 'Drag from one node to another to add a tuple to this store (in this browser).', no: 'No server is called.' },
     { sel: '#btn-derived', name: 'derived', does: 'Draws access that no tuple states directly, with the proof on hover.', no: 'Display only — writes nothing.' },
-    { sel: '#btn-reset-view', name: '⟲ Reset', does: 'Shows the whole graph again: clears the proof walk, focus and highlights.', no: 'Display only — your data is untouched.' },
+    { sel: '#btn-reset-view', name: '⟲ Reset', does: 'Back to the graph as first drawn: clears the proof walk, focus and highlights, closes cards you opened and puts nodes you dragged back in place (Undo in the message brings them back).', no: 'Display only — your model and tuples are untouched. To clear highlights but keep your arrangement, use ⋯ → Clear highlights or press Esc.' },
+    { sel: '#cards-wrap', name: 'Cards', does: 'Chooses which objects are drawn as cards — a box with one row (slot) per relation, so a tuple points at the exact relation it grants, e.g. task:t1 → assignee. “Objects the query walks”: only the objects your last Check / List query passed through open as cards; everything else stays a small node (run a query in the Query lab to see it). “Every object”: all objects are cards — complete, but busier. “None”: every object is a small node, tuples point at the object.', no: 'Changes the drawing only, not the data. Click a node’s ⊕ to open or close a single card.' },
     { sel: '#store-delete', name: 'Delete store', does: 'Removes this store (all versions, tuples, assertions) from this browser, after you confirm.', no: 'Cannot be undone here. Does not delete copies others opened from your share links.' },
     { sel: '[data-del-line]', name: 'delete (tuple)', does: 'Removes this tuple from this store, in this browser.', no: 'No server is called.' },
     { sel: '[data-do="try"]', name: 'try', does: 'Adds the tuple as a contextual tuple for this query only and re-runs it.', no: 'Not saved — clear it in “context”.' },
@@ -145,11 +146,16 @@ user:* viewer document:readme
     $('#btn-saved').addEventListener('click', () => open('data'));
     return { open, close };
   })();
-  function toast(msg) {
+  function toast(msg, action) {
     const el = $('#toast');
     el.textContent = msg; el.hidden = false;
+    if (action) {
+      const b = document.createElement('button'); b.className = 'toast-act'; b.textContent = action.label;
+      b.addEventListener('click', () => { el.hidden = true; action.run(); });
+      el.appendChild(b);
+    }
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 6000 : 2600);
   }
   function copyText(text, label) {
     const done = () => toast(`${label || 'Copied'} to clipboard`);
@@ -1921,7 +1927,12 @@ user:* viewer document:readme
   Graph.on('blankClick', () => { NodeMenu.close(); CtxMenu.close(); if (!Graph.multiSelecting) Graph.clearFocus(); Graph.clearProof(); });
   Graph.on('proofBack', (where) => { if (where === 'matrix') setGraphMode('matrix'); });
   Graph.on('proofOrder', (o) => { S.ui.proofOrder = o; persist(); });
-  $('#btn-reset-view').addEventListener('click', () => { NodeMenu.close(); CtxMenu.close(); Graph.resetView(); });
+  $('#btn-reset-view').addEventListener('click', () => {
+    NodeMenu.close(); CtxMenu.close();
+    const pins = Graph.resetView();
+    if (pins) toast(`View reset — ${Object.keys(pins).length} dragged node${Object.keys(pins).length === 1 ? '' : 's'} put back`, { label: 'Undo', run: () => Graph.restorePins(pins) });
+  });
+  $('#gm-clear').addEventListener('click', () => { gmenu.hidden = true; NodeMenu.close(); CtxMenu.close(); Graph.resetView({ keepLayout: true }); });
   Graph.on('reset', () => { S.proofBack = null; S.stepBack = null; if (S.ui.derived) { /* keep derived edges */ } });
   Graph.on('proofCopy', (title) => { const [user, relation, object] = String(title || '').split(' '); if (user && relation && object) Proof.copyMarkdown({ user, relation, object, context: Query.contextObj() }); });
 
@@ -2039,7 +2050,7 @@ user:* viewer document:readme
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); Query.run({}); return; }
     if (typing && e.key === 'Escape' && !NodeMenu.isOpen && !S.ui.focus) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (mq.matches) { S.ui.mobileView = 'graph'; applyMobile(); } $('#graph-find').focus(); return; }
-    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.resetView(); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
+    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.resetView({ keepLayout: true }); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
     if (typing) return;
     if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setFocus(!S.ui.focus); return; }
     if (e.key === '[') { S.ui.editorOpen = !S.ui.editorOpen; applyLayout(); persist(); return; }

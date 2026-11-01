@@ -133,7 +133,7 @@
         <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
         <label class="compare" id="res-wrap" hidden><span>relation</span><select class="ctl wide" id="res-select" title="Which relation's resolution to draw"><option value="">follow the query</option></select></label>
         <button class="btn sm toggle" id="btn-derived" aria-pressed="false" title="Materialise derived access: every subject who holds a relation without a tuple saying so, as dashed edges with the proof on hover" hidden>derived</button>
-        <label class="compare" id="cards-wrap" hidden><span>cards</span><select class="ctl" id="cards-select" title="Which objects open as cards with one slot (userset) per relation"><option value="path">on the query path</option><option value="all">every object</option><option value="none">none</option></select></label>
+        <label class="compare" id="cards-wrap" hidden><span>cards</span><select class="ctl" id="cards-select" title="Which objects are drawn as cards (one row per relation): only those your last query walked, all of them, or none"><option value="path">objects the query walks</option><option value="all">every object</option><option value="none">none (small nodes)</option></select></label>
         <span class="hint" id="graph-hint"></span>
         <div class="find" id="find-wrap">
           <input class="ctl" id="graph-find" placeholder="Find…  ⌘K" aria-label="Find a node, relation or type" autocomplete="off" spellcheck="false">
@@ -158,6 +158,7 @@
                 <button data-l="radial" aria-pressed="false" title="Rings around the focused node">Radial</button>
               </div>
               <button class="menu-item" id="gm-tidy" title="Lay the whole graph out afresh (nodes otherwise stay where they are while you edit)">Tidy layout</button>
+              <button class="menu-item" id="gm-clear" title="Clear the proof walk, focus and highlights but keep every node where you put it (Esc does the same)">Clear highlights, keep layout</button>
               <button class="menu-item" id="gm-reset" title="Forget dragged positions in this view">Reset moved nodes</button>
               <div class="menu-title">Data view shows</div>
               <div class="seg xs" id="scope-seg">

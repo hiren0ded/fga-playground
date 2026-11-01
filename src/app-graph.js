@@ -1711,17 +1711,24 @@
       if (!opts.auto && mode === 'data') setTimeout(() => fitToHighlighted(true), 30);
     }
     // back to the plain graph: no proof walk, focus, query highlight, opened cards or isolation
-    function resetView() {
+    // Reset = back to the picture as first drawn: also forgets nodes dragged in this view (returned so
+    // the caller can offer Undo). keepLayout: clear the highlights only, leave every node where it is.
+    function resetView(opts = {}) {
+      const keep = !!opts.keepLayout;
+      const key = pinKey(), hadPins = pinned[key] && Object.keys(pinned[key]).length ? pinned[key] : null;
+      if (!keep && hadPins) { pinned[key] = {}; emit('positions', pinned); }
       proofLock = false; svg.node().classList.remove('locked');
       proofWalk = null; proofPreview = null; proofObjects = new Set();
       focus = null; hoverHl = null; currentHl = null; lastOpts = {};
-      cardOverride.clear(); expandedNodes.clear(); openBundles.clear(); expandedTypes.clear();
-      freshNext = true; userMoved = false;
+      if (!keep) { cardOverride.clear(); expandedNodes.clear(); openBundles.clear(); expandedTypes.clear(); freshNext = true; }
+      userMoved = false;
       gBadges.selectAll('*').remove();
       emit('reset');
       render(true);
       fit(true);
+      return keep ? null : hadPins;
     }
+    function restorePins(p) { if (!p) return; pinned[pinKey()] = p; emit('positions', pinned); render(true); }
     function setProofOnly(on) {
       if (!proofWalk || proofWalk.only === !!on) return;
       proofWalk.only = !!on;
@@ -1960,7 +1967,7 @@
     }, 120)).observe(stage);
 
     return {
-      setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
+      setData, setMode, setLayout, setSubjects, setPins, restorePins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
       setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
