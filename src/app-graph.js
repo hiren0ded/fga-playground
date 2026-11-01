@@ -182,7 +182,7 @@
     let mode = 'schema', layoutPreset = 'auto';
     let treeRoot = null, treeQueryKey = null, treeExpanded = new Map();
     // instance graph (data view): which objects open as cards with one slot per relation
-    let cardsMode = 'path', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
+    let cardsMode = 'none', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
     let derivedOnly = false;
     let derivedAccess = null; // [{ user, relation, object, wildcard }] materialised access that no tuple states directly
     // proof walk: a numbered path (FGA.proofSteps) drawn over the data graph. `proofWalk` is pinned by a
@@ -232,7 +232,7 @@
     function setLayout(p) { layoutPreset = p; freshNext = true; userMoved = false; render(true); }
     function setSubjects() { /* kept for API compatibility; the resolution view has no subject fan-out */ }
     // instance graph: 'path' = cards for the objects the current query touched, 'all', or 'none'
-    function setCardsMode(m) { if (!['path', 'all', 'none'].includes(m)) m = 'path'; if (m === cardsMode) return; cardsMode = m; cardOverride.clear(); if (mode === 'data') render(true); }
+    function setCardsMode(m) { if (!['path', 'all', 'none'].includes(m)) m = 'none'; if (m === cardsMode) return; cardsMode = m; cardOverride.clear(); if (mode === 'data') render(true); }
     function setPathObjects(ids) {
       const next = new Set((ids || []).filter(Boolean));
       const same = next.size === pathObjects.size && Array.from(next).every((x) => pathObjects.has(x));
@@ -825,6 +825,8 @@
     function declutterLabels() {
       if (!curL || mode === 'model' || mode === 'matrix') return;
       const rects = curL.nodes.map((n) => ({ x0: n.x - n.width / 2, y0: n.y - n.height / 2, x1: n.x + n.width / 2, y1: n.y + n.height / 2 }));
+      const hlIds = new Set(); gNodes.selectAll('g.node.hl').each(function (n) { hlIds.add(n.id); });
+      const hlRects = curL.nodes.filter((n) => hlIds.has(n.id)).map((n) => ({ x0: n.x - n.width / 2, y0: n.y - n.height / 2, x1: n.x + n.width / 2, y1: n.y + n.height / 2 }));
       const over = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
       const items = [];
       gEdges.selectAll('g.edge').each(function (e) {
@@ -843,10 +845,15 @@
         let total = 0; try { total = path.getTotalLength(); } catch (err) { total = 0; }
         const cands = [it.e.mid];
         if (total > 40) [0.35, 0.65, 0.22, 0.78].forEach((t) => { try { const p = path.getPointAtLength(total * t); cands.push({ x: p.x, y: p.y }); } catch (err) { /* ignore */ } });
-        const ok = cands.find((c) => { const r = { x0: c.x - it.w / 2, y0: c.y - 9, x1: c.x + it.w / 2, y1: c.y + 9 }; return !placed.some((p) => over(r, p)) && !rects.some((p) => over(r, p)); });
+        const box = (c) => ({ x0: c.x - it.w / 2, y0: c.y - 9, x1: c.x + it.w / 2, y1: c.y + 9 });
+        let ok = cands.find((c) => { const r = box(c); return !placed.some((p) => over(r, p)) && !rects.some((p) => over(r, p)); });
+        // a hovered or highlighted edge always shows its name: dimmed nodes and labels may sit under it
+        if (!ok && it.prio >= 3) {
+          ok = cands.find((c) => { const r = box(c); return !placed.some((p) => p.prio >= 3 && over(r, p)) && !hlRects.some((p) => over(r, p)); }) || it.e.mid;
+        }
         if (!ok) { it.lbl.classList.add('lbl-off'); return; }
         if (ok !== it.e.mid) it.lbl.setAttribute('transform', `translate(${ok.x - it.e.mid.x},${ok.y - it.e.mid.y})`);
-        placed.push({ x0: ok.x - it.w / 2, y0: ok.y - 9, x1: ok.x + it.w / 2, y1: ok.y + 9 });
+        placed.push({ x0: ok.x - it.w / 2, y0: ok.y - 9, x1: ok.x + it.w / 2, y1: ok.y + 9, prio: it.prio });
       });
     }
     function applyPins(L) {
@@ -1496,7 +1503,9 @@
     // ── painting
     const HL = ['hl', 'hl-active', 'hl-read', 'hl-ok', 'hl-fail', 'hl-skip', 'hl-in', 'hl-out', 'hl-ghost'];
     function highlight(hl, opts = {}) { currentHl = hl; lastOpts = opts; applyVisual(); }
-    function applyVisual() {
+    // labels are re-placed whenever highlighting changes: highlighted edges get first pick of the space
+    function applyVisual(...args) { applyVisualNow(...args); if (curL) declutterLabels(); }
+    function applyVisualNow() {
       const svgEl = svg.node();
       const wasIsolated = svgEl.classList.contains('isolate');
       svgEl.classList.toggle('isolate', !!(focus && focus.isolate));
@@ -1657,7 +1666,6 @@
       applyVisual();
       updateMinimap();
       updateLod(curT.k);
-      declutterLabels();
     }
 
     // ── proof walk

@@ -30,7 +30,8 @@ wildcard/exclusion set algebra for ListUsers).
     relation** (`doc:roadmap#viewer` is a real node), tuples point at the slot they grant,
     computed relations are arcs between rows, "viewer from parent" is a derived edge between
     cards, and the **edges** menu adds every grant no tuple states (or shows only those), with the proof on
-    hover. Cards can be opened for every object or none.
+    hover. By default objects are small nodes; cards can be opened for the objects the query walks, for
+    every object, or one at a time with ⊕ (a proof walk always opens the cards it passes through).
   - *Matrix* – subjects × objects for one relation: direct tuple, derived, public wildcard or
     excluded, with a diff against any written model version (gained / lost). Click a cell to
     run that Check and see its proof in place — as a matrix of usersets (the subject's row plus a
