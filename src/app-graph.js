@@ -265,20 +265,42 @@
     // userset subjects start from a slot on their own card, computed relations become links between the
     // rows of one card, and "X from Y" becomes a derived edge from the parent's slot to the child's.
     // Objects that stay plain nodes keep the classic one-edge-per-tuple drawing.
+    // When a pinned proof walk asks for "only the path", the data view is reduced to exactly the
+    // nodes, slots, tuples and derivations the proof uses — nothing else is laid out at all.
+    function proofFilter() {
+      const walk = proofWalk;
+      if (!walk || !walk.only) return null;
+      const f = { nodes: new Set(), slots: new Set(), tuples: new Set(), ttu: new Set(), gids: new Set() };
+      walk.steps.forEach((st) => {
+        [st.from, st.to].forEach((k) => { if (!k) return; if (k.includes('#')) { f.slots.add(k); f.nodes.add(k.split('#')[0]); } else f.nodes.add(k); });
+        if (st.fromObject) f.nodes.add(st.fromObject);
+        if (st.object) f.nodes.add(st.object);
+        if (st.kind === 'tuple' && st.tupleId != null) f.tuples.add(st.tupleId);
+        if (st.kind === 'ttu') { f.ttu.add(`${st.tupleId}|${st.relation}`); f.tuples.add(st.tupleId); }
+        if (st.gid) f.gids.add(st.gid);
+        if ((st.kind === 'and' || st.kind === 'not') && st.object && st.relation) f.slots.add(`${st.object}#${st.relation}`);
+      });
+      return f;
+    }
     function instanceGraph(g0) {
       const m = modelRef, store = storeRef;
+      const pf = proofFilter();
       const typeOf = (t) => (m ? m.typeMap.get(t) : null);
       const canCard = (n) => { if (n.kind !== 'object') return false; const t = typeOf(n.type); return !!(t && t.relations.length); };
       const wantCard = (n) => { if (!canCard(n)) return false; if (proofObjects.has(n.id)) return true; if (cardOverride.has(n.id)) return cardOverride.get(n.id); return cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(n.id); };
-      const nodes = g0.nodes.map((n) => {
+      const nodes = (pf ? g0.nodes.filter((n) => pf.nodes.has(n.id)) : g0.nodes).map((n) => {
         if (!wantCard(n)) return Object.assign({}, n, { expandable: canCard(n) });
         const t = typeOf(n.type);
-        const rows = t.relations.map((r) => ({ id: `${n.id}#${r.name}`, kind: 'slot', rel: r.name, object: n.id, type: n.type, label: `${n.id}#${r.name}`, def: `define ${r.name}: ${FGA.describeRewrite(r.rewrite)}`, short: FGA.describeRewrite(r.rewrite), direct: 0, derived: 0, directTypes: r.directTypes.map(FGA.describeEntry), line: r.line }));
+        const rels = pf ? t.relations.filter((r) => pf.slots.has(`${n.id}#${r.name}`)) : t.relations;
+        if (!rels.length) return Object.assign({}, n, { expandable: false });
+        const rows = rels.map((r) => ({ id: `${n.id}#${r.name}`, kind: 'slot', rel: r.name, object: n.id, type: n.type, label: `${n.id}#${r.name}`, def: `define ${r.name}: ${FGA.describeRewrite(r.rewrite)}`, short: FGA.describeRewrite(r.rewrite), direct: 0, derived: 0, directTypes: r.directTypes.map(FGA.describeEntry), line: r.line }));
         return Object.assign({}, n, { kind: 'inst', card: true, rows, rowMap: new Map(rows.map((r) => [r.rel, r])), links: [] });
       });
       const byId = new Map(nodes.map((n) => [n.id, n]));
       const groups = new Map();
       for (const e of g0.edges) {
+        if (pf && !pf.tuples.has(e.tupleId)) continue;
+        if (!byId.has(e.from) || !byId.has(e.to)) continue;
         const toN = byId.get(e.to), fromN = byId.get(e.from);
         const toSlot = toN.kind === 'inst' && toN.rowMap.has(e.label) ? `${e.to}#${e.label}` : null;
         const fromSlot = e.userset && fromN.kind === 'inst' && fromN.rowMap.has(e.userset) ? `${e.from}#${e.userset}` : null;
@@ -304,11 +326,14 @@
             if (me.type !== n.type) continue;
             if (me.kind === 'computed') {
               if (!n.rowMap.has(me.via) || !n.rowMap.has(me.relation)) continue;
+              if (pf && !pf.gids.has(me.gid)) continue;
               n.links.push({ id: `cmp:${n.id}:${me.via}>${me.relation}`, from: me.via, to: me.relation, gid: me.gid, ctx: me.ctx, object: n.id });
               n.rowMap.get(me.relation).derived++;
             } else if (me.kind === 'ttu') {
+              if (!n.rowMap.has(me.relation)) continue;
               for (const t of store.read(n.id, me.tupleset)) {
                 if (t.user.relation || t.user.wildcard || t.user.type !== me.parentType) continue;
+                if (pf && !pf.ttu.has(`${t.id}|${me.relation}`)) continue;
                 const pid = `${t.user.type}:${t.user.id}`; const pn = byId.get(pid); if (!pn) continue;
                 const fromSlot = pn.kind === 'inst' && pn.rowMap.has(me.computed) ? `${pid}#${me.computed}` : null;
                 edges.push({ id: `ttu:${t.id}:${me.relation}`, kind: 'ttu', derived: true, from: pid, to: n.id, fromSlot, toSlot: `${n.id}#${me.relation}`, tupleIds: [t.id], tupleId: t.id, rel: me.relation, rels: [me.relation], labels: [], usersets: [], conditions: [], contextual: !!t.contextual, wildcard: false, gid: me.gid, ctx: me.ctx, tupleset: me.tupleset, computed: me.computed, label: fromSlot ? `from ${me.tupleset}` : `${me.computed} from ${me.tupleset}` });
@@ -319,7 +344,7 @@
         });
       }
       // materialised access: who ends up holding each relation without a tuple saying so
-      if (derivedAccess) {
+      if (derivedAccess && !pf) {
         const seen = new Set(edges.map((e) => `${e.fromSlot || e.from}|${e.toSlot || e.to}`));
         for (const d of derivedAccess) {
           const fromN = byId.get(d.user), toN = byId.get(d.object);
@@ -1196,7 +1221,7 @@
         } else if (e.derived) {
           // a tuple-to-userset edge lights up with the tuple it derives from, when its slot is in play
           const st = edgesHl[`t${e.tupleId}`];
-          if (st && (nodes[e.toSlot] || nodes[e.to] || nodes[e.fromSlot] || nodes[e.from])) best = st;
+          if (st && nodes[e.toSlot]) best = st;
         } else {
           best = edgesHl[e.id] || null;
           const keys = mode === 'data' ? e.tupleIds.map((id) => `t${id}`) : (e.gids || []);
@@ -1328,15 +1353,21 @@
       steps.forEach((st) => { if (st.object) objs.add(st.object); if (st.fromObject) objs.add(st.fromObject); [st.from, st.to].forEach((k) => { if (k && k.includes('#')) objs.add(k.split('#')[0]); }); });
       const canOpen = (o) => { const t = modelRef && modelRef.typeMap.get(o.split(':')[0]); return !!(t && t.relations.length); };
       const isCardNow = (o) => !!(curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
-      proofWalk = { proof, steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto };
+      const wasOnly = !!(proofWalk && proofWalk.only);
+      proofWalk = { proof, steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto, only: opts.only !== undefined ? !!opts.only : !!opts.lock };
       proofLock = !!opts.lock;
       svg.node().classList.toggle('locked', proofLock);
       proofPreview = null;
       proofObjects = objs;
-      // open the cards the walk needs (slots and arcs only exist on cards)
-      if (mode === 'data' && Array.from(objs).some((o) => canOpen(o) && !isCardNow(o) && curL && curL.nodes.some((n) => n.id === o))) render(true);
+      // "only the path" changes which nodes exist at all; otherwise open the cards the walk needs
+      if (mode === 'data' && (proofWalk.only || wasOnly || Array.from(objs).some((o) => canOpen(o) && !isCardNow(o) && curL && curL.nodes.some((n) => n.id === o)))) render(true);
       else { renderProofBar(); applyVisual(); }
       if (!opts.auto && mode === 'data') setTimeout(() => fitToHighlighted(true), 30);
+    }
+    function setProofOnly(on) {
+      if (!proofWalk || proofWalk.only === !!on) return;
+      proofWalk.only = !!on;
+      if (mode === 'data') { render(true); setTimeout(() => fitToHighlighted(true), 30); } else renderProofBar();
     }
     function clearProof(opts = {}) {
       if (locked() && !opts.force) return;
@@ -1344,8 +1375,9 @@
       if (!proofWalk && !proofPreview && !proofObjects.size) return;
       const wouldStay = (o) => (cardOverride.has(o) ? cardOverride.get(o) : cardsMode === 'all' ? true : cardsMode === 'none' ? false : pathObjects.has(o));
       const closes = mode === 'data' && Array.from(proofObjects).some((o) => !wouldStay(o) && curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
+      const wasOnly = !!(proofWalk && proofWalk.only);
       proofWalk = null; proofPreview = null; proofObjects = new Set();
-      if (closes) render(true); else { renderProofBar(); applyVisual(); }
+      if (closes || (wasOnly && mode === 'data')) render(true); else { renderProofBar(); applyVisual(); }
     }
     const pbar = $('#proof-bar');
     function renderProofBar() {
@@ -1353,13 +1385,14 @@
       const walk = mode === 'data' ? proofWalk : null;
       pbar.hidden = !walk;
       if (!walk) return;
-      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
+      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><span class="seg xs pb-only" title="Only the path: lay out just the nodes, slots and edges this proof uses. Whole graph: keep everything, dimmed"><button data-only="1" aria-pressed="${!!walk.only}">only the path</button><button data-only="0" aria-pressed="${!walk.only}">whole graph</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
       $$('.pb-step', pbar).forEach((b) => {
         const st = walk.steps[+b.dataset.i];
         b.addEventListener('mouseenter', () => flashStep(st));
         b.addEventListener('click', () => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); });
       });
       $$('.pb-order button', pbar).forEach((b) => b.addEventListener('click', () => setProofOrder(b.dataset.o)));
+      $$('.pb-only button', pbar).forEach((b) => b.addEventListener('click', () => setProofOnly(b.dataset.only === '1')));
       $('#pb-lock').addEventListener('click', () => { proofLock = !proofLock; svg.node().classList.toggle('locked', proofLock); renderProofBar(); });
       const back = $('#pb-back'); if (back) back.addEventListener('click', () => emit('proofBack', walk.back));
       $('#pb-close').addEventListener('click', () => clearProof({ force: true }));
@@ -1411,11 +1444,14 @@
       gBadges.selectAll('*').remove();
       const walk = proofWalk || proofPreview;
       if (!walk || !curL || mode !== 'data') return;
-      const used = new Map();
+      const placed = [];
       walk.steps.forEach((st) => {
         const p = stepAnchor(st); if (!p) return;
-        const key = `${Math.round(p.x / 10)}|${Math.round(p.y / 10)}`; const k = used.get(key) || 0; used.set(key, k + 1);
-        const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}`).attr('transform', `translate(${p.x + k * 17},${p.y})`);
+        // nudge right until clear of every badge already placed
+        let x = p.x, guard = 0;
+        while (guard++ < 12 && placed.some((q) => Math.hypot(q.x - x, q.y - p.y) < 19)) x += 19;
+        placed.push({ x, y: p.y });
+        const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}`).attr('transform', `translate(${x},${p.y})`);
         g.append('circle').attr('r', 9);
         g.append('text').attr('y', 3.5).attr('text-anchor', 'middle').text(st.n);
         g.on('mouseenter', (ev) => showTip(ev, `<code>${st.n}. ${esc(st.text)}</code><div class="sub">${esc(st.why || '')}</div>`)).on('mousemove', moveTip).on('mouseleave', hideTip);
@@ -1557,7 +1593,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, setProofOnly, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,
