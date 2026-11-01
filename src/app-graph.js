@@ -674,9 +674,14 @@
       L.stabilized = false;
       const prev = prevPos[mode];
       if (freshNext || !prev || prev.key !== viewKey()) { freshNext = false; return; }
+      // never freeze a provisional layout (the quick dagre draw that ELK is about to replace)
+      if (!prev.final) return;
       const kept = L.nodes.filter((n) => prev.pos.has(n.id)), added = L.nodes.filter((n) => !prev.pos.has(n.id));
       const removed = prev.pos.size - kept.length;
       if (kept.length < 2 || added.length + removed > Math.max(4, L.nodes.length * 0.25)) return;
+      // many small edits add up: after enough nodes were slotted in by hand, lay out afresh
+      if ((prev.drift || 0) + added.length + removed > Math.max(6, L.nodes.length * 0.3)) return;
+      L.drift = (prev.drift || 0) + added.length + removed;
       if (kept.some((n) => { const p = prev.pos.get(n.id); return Math.abs(p.w - n.width) > 24 || Math.abs(p.h - n.height) > 10; })) return;
       let dx = 0, dy = 0;
       kept.forEach((n) => { const p = prev.pos.get(n.id); dx += p.x - n.x; dy += p.y - n.y; });
@@ -699,7 +704,7 @@
       });
       L.stabilized = true;
     }
-    function rememberPositions(L) { if (!L) return; prevPos[mode] = { key: viewKey(), pos: new Map(L.nodes.map((n) => [n.id, { x: n.x, y: n.y, w: n.width, h: n.height }])), edges: new Map(L.edges.map((e) => [e.id, { points: e.points ? e.points.map((p) => ({ x: p.x, y: p.y })) : null, elk: !!e.elk, lx: e.lx, ly: e.ly }])) }; }
+    function rememberPositions(L) { if (!L) return; const final = !useElk() || !!L.elkDone || (L.stabilized && !!(prevPos[mode] && prevPos[mode].final)); prevPos[mode] = { key: viewKey(), final, drift: L.stabilized ? (L.drift || 0) : 0, pos: new Map(L.nodes.map((n) => [n.id, { x: n.x, y: n.y, w: n.width, h: n.height }])), edges: new Map(L.edges.map((e) => [e.id, { points: e.points ? e.points.map((p) => ({ x: p.x, y: p.y })) : null, elk: !!e.elk, lx: e.lx, ly: e.ly }])) }; }
     function tidy() { freshNext = true; pinned[mode] = {}; emit('positions', pinned); userMoved = false; render(true); }
     // ── ELK
     function loadElk() {
@@ -760,6 +765,7 @@
           if (lb && lb.x != null) { e.lx = lb.x + lb.width / 2; e.ly = lb.y + lb.height / 2; } else { e.lx = undefined; e.ly = undefined; }
         });
         applyPins(L);
+        L.elkDone = true;
         bounds = boundsOf(L);
         draw(L, true);
         rememberPositions(L);
