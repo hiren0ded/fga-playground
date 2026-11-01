@@ -808,6 +808,12 @@ user:* viewer document:readme
       const evs = r.res.trace.events;
       i = Math.max(0, Math.min(evs.length - 1, i));
       S.step = i;
+      // stepping is drawn on the graph; the matrix can't show it, so move to the data view (with a way back)
+      if (scroll !== false && Graph.mode === 'matrix') {
+        S.stepBack = 'matrix';
+        setGraphMode('data');
+        toast('Stepping through the trace is shown on the graph — switched to the Data view. “← back to matrix” returns.');
+      }
       const e = evs[i];
       const last = i === evs.length - 1;
       $('#st-pos').textContent = `step ${i + 1} / ${evs.length}`;
@@ -826,8 +832,8 @@ user:* viewer document:readme
       if (last) {
         Graph.highlight(r.type === 'check' && r.res.allowed && r.proofHl && !S.ui.allSteps ? r.proofHl : S.summaryHl, { stepping: false });
         // the proof as a numbered walk over the data graph
-        if (r.type === 'check' && r.res.allowed && r.res.root && r.res.root.proof) Graph.showProof(r.res.root.proof, { pin: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || null });
-        else if (r.type === 'check' && r.denial) { const qq = { user: r.q.user, relation: r.q.relation, object: r.q.object, context: r.q.contextObj }; Graph.showProof({ stepsFor: (o) => (FGA.explainDenial(S.effectiveModel, S.store, qq, r.res, o) || { steps: [] }).steps }, { pin: true, denial: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || null }); }
+        if (r.type === 'check' && r.res.allowed && r.res.root && r.res.root.proof) Graph.showProof(r.res.root.proof, { pin: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || S.stepBack || null });
+        else if (r.type === 'check' && r.denial) { const qq = { user: r.q.user, relation: r.q.relation, object: r.q.object, context: r.q.contextObj }; Graph.showProof({ stepsFor: (o) => (FGA.explainDenial(S.effectiveModel, S.store, qq, r.res, o) || { steps: [] }).steps }, { pin: true, denial: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || S.stepBack || null }); }
         else Graph.clearProof({ force: true });
       } else {
         Graph.clearProof({ force: true });
@@ -1589,7 +1595,7 @@ user:* viewer document:readme
     $('#find-wrap').hidden = m === 'matrix';
     const hb = $('#health-bar'); if (hb) hb.hidden = m !== 'schema';
   }
-  function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
+  function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; if (m === 'matrix') S.stepBack = null; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
   Graph.on('rootChanged', () => renderResSelect());
   $('#cards-select').addEventListener('change', () => { S.ui.cards = $('#cards-select').value; Graph.setCardsMode(S.ui.cards); persist(); });
@@ -1897,7 +1903,7 @@ user:* viewer document:readme
   Graph.on('proofBack', (where) => { if (where === 'matrix') setGraphMode('matrix'); });
   Graph.on('proofOrder', (o) => { S.ui.proofOrder = o; persist(); });
   $('#btn-reset-view').addEventListener('click', () => { NodeMenu.close(); CtxMenu.close(); Graph.resetView(); });
-  Graph.on('reset', () => { S.proofBack = null; if (S.ui.derived) { /* keep derived edges */ } });
+  Graph.on('reset', () => { S.proofBack = null; S.stepBack = null; if (S.ui.derived) { /* keep derived edges */ } });
   Graph.on('proofCopy', (title) => { const [user, relation, object] = String(title || '').split(' '); if (user && relation && object) Proof.copyMarkdown({ user, relation, object, context: Query.contextObj() }); });
 
   // ── layout: collapsible panes, resizable widths, focus mode
