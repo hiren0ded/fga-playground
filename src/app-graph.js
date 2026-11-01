@@ -253,7 +253,11 @@
     function toggleExpand(id, on) { treeExpanded.set(id, on); render(true); }
     function setPins(p) { pinned = Object.assign({ schema: {}, model: {}, data: {} }, p || {}); }
     function setCollapsed(list) { collapsed = new Set(list || []); }
-    function resetLayout() { pinned[mode] = {}; emit('positions', pinned); render(true); }
+    // dragged positions belong to the picture they were dragged in: in the data view a different layout
+    // preset or card setting is a different picture (cards are much bigger), so it gets its own pins
+    const pinKey = () => (mode === 'data' ? `data|${layoutPreset}|${cardsMode}` : mode);
+    const pinsNow = () => pinned[pinKey()] || (pinned[pinKey()] = {});
+    function resetLayout() { pinned[pinKey()] = {}; emit('positions', pinned); render(true); }
 
     // ── view graphs: what each mode actually draws
     function viewGraph() {
@@ -322,7 +326,7 @@
       Object.keys((currentHl && currentHl.dataNodes) || {}).forEach((k) => protect.add(k.split('#')[0]));
       if (proofWalk) proofWalk.steps.forEach((st) => { if (st.from) protect.add(st.from.split('#')[0]); });
       if (focus) focus.nodes.forEach((id) => protect.add(id));
-      Object.keys(pinned.data || {}).forEach((id) => protect.add(id));
+      Object.keys(pinned[pinKey()] || {}).forEach((id) => protect.add(id));
       const deg = new Map();
       vg.edges.forEach((e) => { deg.set(e.from, (deg.get(e.from) || 0) + 1); deg.set(e.to, (deg.get(e.to) || 0) + 1); });
       const byId = new Map(vg.nodes.map((n) => [n.id, n]));
@@ -595,6 +599,7 @@
         .stop();
       if (sim.randomSource) sim.randomSource(rnd);
       for (let i = 0; i < 320; i++) sim.tick();
+      separate({ nodes }, new Set());
       const minX = Math.min(...nodes.map((n) => n.x - n.width / 2)), minY = Math.min(...nodes.map((n) => n.y - n.height / 2));
       nodes.forEach((n) => { n.x = n.x - minX + 40; n.y = n.y - minY + 40; delete n.vx; delete n.vy; delete n.index; });
       return { nodes: vg.nodes, edges: vg.edges, clusters: [] };
@@ -711,7 +716,7 @@
       L.stabilized = true;
     }
     function rememberPositions(L) { if (!L) return; const final = !useElk() || !!L.elkDone || (L.stabilized && !!(prevPos[mode] && prevPos[mode].final)); prevPos[mode] = { key: viewKey(), final, drift: L.stabilized ? (L.drift || 0) : 0, pos: new Map(L.nodes.map((n) => [n.id, { x: n.x, y: n.y, w: n.width, h: n.height }])), edges: new Map(L.edges.map((e) => [e.id, { points: e.points ? e.points.map((p) => ({ x: p.x, y: p.y })) : null, elk: !!e.elk, lx: e.lx, ly: e.ly }])) }; }
-    function tidy() { freshNext = true; pinned[mode] = {}; emit('positions', pinned); userMoved = false; render(true); }
+    function tidy() { freshNext = true; pinned[pinKey()] = {}; emit('positions', pinned); userMoved = false; render(true); }
     // ── ELK
     function loadElk() {
       if (elk) return Promise.resolve(elk);
@@ -831,10 +836,30 @@
       });
     }
     function applyPins(L) {
-      const pins = pinned[mode] || {};
+      const pins = pinned[pinKey()] || {};
       const moved = new Set();
       L.nodes.forEach((n) => { const p = pins[n.id]; if (p) { n.x = p.x; n.y = p.y; n.pinned = true; moved.add(n.id); } });
+      if (moved.size) separate(L, moved);
       L.edges.forEach((e) => { if (moved.has(e.from) || moved.has(e.to)) e.points = null; });
+    }
+    // safety net: no two boxes may overlap. Pinned nodes stay (unless two pins collide, then both give
+    // way); whatever overlaps them, or each other, is pushed out along the shorter axis. Every node it moves is added to `moved` (its edges re-route).
+    function separate(L, moved) {
+      const pad = 14, nodes = L.nodes;
+      for (let pass = 0; pass < 40; pass++) {
+        let any = false;
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const ox = (a.width + b.width) / 2 + pad - Math.abs(a.x - b.x), oy = (a.height + b.height) / 2 + pad - Math.abs(a.y - b.y);
+          if (ox <= 0 || oy <= 0) continue;
+          any = true;
+          const share = a.pinned ? [0, 1] : b.pinned ? [1, 0] : [0.5, 0.5];
+          if (ox < oy) { const d = (a.x <= b.x ? -1 : 1) * ox; a.x += d * share[0]; b.x -= d * share[1]; }
+          else { const d = (a.y <= b.y ? -1 : 1) * oy; a.y += d * share[0]; b.y -= d * share[1]; }
+          if (!a.pinned) moved.add(a.id); if (!b.pinned) moved.add(b.id);
+        }
+        if (!any) break;
+      }
     }
     function computeClusters(L) {
       if (!L.clusters || !L.clusters.length) { L.clusters = []; return; }
@@ -1226,7 +1251,7 @@
           if (!start) return;
           d3.select(this).classed('dragging', false);
           if (Math.hypot(n.x - start.x, n.y - start.y) < 2) { n.x = start.x; n.y = start.y; return; }
-          pinned[mode][n.id] = { x: Math.round(n.x), y: Math.round(n.y) };
+          pinsNow()[n.id] = { x: Math.round(n.x), y: Math.round(n.y) };
           rememberPositions(curL);
           d3.select(this).classed('pinned', true);
           if (!d3.select(this).select('circle.pin').size()) d3.select(this).append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
