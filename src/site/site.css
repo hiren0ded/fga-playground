@@ -183,3 +183,6 @@ table.tbl td { color: var(--fg-2); }
 .try { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14.5px; margin-top: 4px; }
 .callout { border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 18px 0; color: var(--fg-2); }
 .callout b { color: var(--fg); }
+
+.theme-toggle { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: transparent; color: var(--fg-2); font-size: 16px; cursor: pointer; display: inline-grid; place-items: center; }
+.theme-toggle:hover { color: var(--fg); background: var(--surface); }

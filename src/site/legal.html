@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem('fga-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <title>Disclaimer &amp; privacy — FGA Explorer</title>
 <meta name="description" content="FGA Explorer is an unofficial learning project: affiliation, trademarks, accuracy, privacy and third parties.">
 <link rel="icon" href="{{FAVICON}}">
@@ -79,5 +80,18 @@
   </article>
 </div>
 {{FOOTER}}
+<script>
+(function () {
+  var order = ['system', 'light', 'dark'], icon = { system: '\u25d0', light: '\u2600', dark: '\u263e' }, label = { system: 'Theme: follows your system', light: 'Theme: light', dark: 'Theme: dark' };
+  function get() { try { var t = localStorage.getItem('fga-theme'); return t === 'light' || t === 'dark' ? t : 'system'; } catch (e) { return 'system'; } }
+  function apply(t) {
+    if (t === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+    try { if (t === 'system') localStorage.removeItem('fga-theme'); else localStorage.setItem('fga-theme', t); } catch (e) {}
+    Array.prototype.forEach.call(document.querySelectorAll('.theme-toggle'), function (b) { b.textContent = icon[t]; b.title = label[t] + ' \u2014 click to switch'; b.setAttribute('aria-label', label[t]); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.theme-toggle'), function (b) { b.addEventListener('click', function () { apply(order[(order.indexOf(get()) + 1) % order.length]); }); });
+  apply(get());
+})();
+</script>
 </body>
 </html>

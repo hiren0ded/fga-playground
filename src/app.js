@@ -83,6 +83,68 @@ user:* viewer document:readme
 
   // ───────────────────────── toast ─────────────────────────
   let toastTimer;
+  // ── guidance: what each action does and doesn't do. Rich tooltips by selector (works for buttons
+  // rendered later too), the same entries feed the guide's table.
+  const TIPS = [
+    { sel: '#btn-write-model', name: 'Write model', does: 'Saves the draft as a new, numbered model version of this store — in this browser (it imitates OpenFGA’s WriteAuthorizationModel).', no: 'Does not touch any OpenFGA server or anyone else’s copy. Earlier versions are kept; nothing is overwritten.' },
+    { sel: '#btn-share', name: 'Share', does: 'Copies a link holding a snapshot of this store: model, tuples, assertions and the current query.', no: 'Uploads nothing. Later edits don’t update the link — share again. People who open it get their own copy; their edits never reach you.' },
+    { sel: '#btn-new-store', name: '+ New', does: 'Creates an empty store with a starter model, saved in this browser.', no: 'Does not change your other stores.' },
+    { sel: '#btn-store-menu', name: 'Store menu ⋯', does: 'Rename, duplicate or delete this store — in this browser.', no: 'Does not affect copies other people opened from your share links.' },
+    { sel: '#store-select', name: 'Store picker', does: 'Switches which of your saved stores you are looking at. “· edited” marks a copy you have changed.', no: 'Switching never loses changes — every store is saved as you type.' },
+    { sel: '#qa-add', name: 'Write (tuple)', does: 'Adds the tuple to this store’s tuple list, in this browser (like OpenFGA’s Write API).', no: 'No server is called; no one else’s store changes.' },
+    { sel: '#btn-format-dsl', name: 'Format', does: 'Re-indents the model text.', no: 'Does not change what the model means or write a version.' },
+    { sel: '#q-run', name: 'Run', does: 'Runs the query against this store, locally, and shows the answer and the trace.', no: 'Never changes the model or tuples.' },
+    { sel: '#q-live', name: 'live', does: 'Re-runs the query automatically after every edit.', no: 'Read-only, like Run.' },
+    { sel: '#q-adv-toggle', name: 'context', does: 'Request context for conditions, and contextual tuples used only for this query.', no: 'Contextual tuples are never saved into the store.' },
+    { sel: '#btn-connect', name: 'connect', does: 'Drag from one node to another to add a tuple to this store (in this browser).', no: 'No server is called.' },
+    { sel: '#btn-derived', name: 'derived', does: 'Draws access that no tuple states directly, with the proof on hover.', no: 'Display only — writes nothing.' },
+    { sel: '#btn-reset-view', name: '⟲ Reset', does: 'Shows the whole graph again: clears the proof walk, focus and highlights.', no: 'Display only — your data is untouched.' },
+    { sel: '#store-delete', name: 'Delete store', does: 'Removes this store (all versions, tuples, assertions) from this browser, after you confirm.', no: 'Cannot be undone here. Does not delete copies others opened from your share links.' },
+    { sel: '[data-del-line]', name: 'delete (tuple)', does: 'Removes this tuple from this store, in this browser.', no: 'No server is called.' },
+    { sel: '[data-do="try"]', name: 'try', does: 'Adds the tuple as a contextual tuple for this query only and re-runs it.', no: 'Not saved — clear it in “context”.' },
+    { sel: '[data-do="write"]', name: 'write', does: 'Adds the tuple to this store, in this browser.', no: 'No server is called.' },
+    { sel: '[data-do="delete"]', name: 'delete', does: 'Removes the tuple from this store, in this browser.', no: 'No server is called.' },
+    { sel: '#res-share, #mw-share', name: 'Share explanation', does: 'Copies a link to this store that opens straight onto this explanation.', no: 'Uploads nothing; the link is a snapshot.' },
+    { sel: '#res-md, #mw-md, #pb-md', name: 'Copy as markdown', does: 'Copies the sentence and numbered steps as text for a ticket or review.', no: 'Changes nothing.' },
+    { sel: '#res-assert', name: '+ Assertion', does: 'Saves this check with its expected result as an assertion in this store.', no: 'Local only — a test, not a rule OpenFGA enforces.' },
+    { sel: '#btn-saved', name: 'Saved in this browser', does: 'Everything you do here is saved automatically in this browser’s storage.', no: 'Not synced anywhere: other browsers and devices don’t see it; clearing site data removes it.' },
+  ];
+  (function wireTips() {
+    const tip = $('#ui-tip');
+    let cur = null, timer = null;
+    const find = (el) => { for (const t of TIPS) { const m = el.closest && el.closest(t.sel); if (m) return { t, el: m }; } return null; };
+    const hide = () => { clearTimeout(timer); tip.hidden = true; cur = null; };
+    document.addEventListener('mouseover', (ev) => {
+      const hit = find(ev.target);
+      if (!hit) { if (cur && !cur.contains(ev.target)) hide(); return; }
+      if (hit.el === cur) return;
+      hide(); cur = hit.el;
+      if (hit.el.hasAttribute('title')) { hit.el.dataset.title = hit.el.getAttribute('title'); hit.el.removeAttribute('title'); }
+      timer = setTimeout(() => {
+        tip.innerHTML = `<b>${esc(hit.t.name)}</b><div class="does">${esc(hit.t.does)}</div><div class="no">${esc(hit.t.no)}</div>`;
+        tip.hidden = false;
+        const r = hit.el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+        let x = Math.min(window.innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2)), y = r.bottom + 8;
+        if (y + h > window.innerHeight - 8) y = r.top - h - 8;
+        tip.style.left = x + 'px'; tip.style.top = y + 'px';
+      }, 300);
+    });
+    document.addEventListener('mousedown', hide, true);
+    document.addEventListener('scroll', hide, true);
+  })();
+  // the guide: where data lives, sharing, and every button
+  const Guide = (() => {
+    const el = $('#guide');
+    $('#guide-rows').innerHTML = TIPS.map((t) => `<tr><td>${esc(t.name)}</td><td>${esc(t.does)}</td><td>${esc(t.no)}</td></tr>`).join('');
+    function open(section) { el.hidden = false; const target = section && $('#guide-' + section); if (target) target.scrollIntoView({ block: 'start' }); $('#guide-close').focus(); S.ui.guideSeen = true; persist(); }
+    function close() { el.hidden = true; }
+    $('#guide-close').addEventListener('click', close);
+    el.addEventListener('click', (ev) => { if (ev.target === el) close(); });
+    document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !el.hidden) { ev.stopPropagation(); close(); } }, true);
+    $('#btn-guide').addEventListener('click', () => open());
+    $('#btn-saved').addEventListener('click', () => open('data'));
+    return { open, close };
+  })();
   function toast(msg) {
     const el = $('#toast');
     el.textContent = msg; el.hidden = false;
@@ -1056,6 +1118,17 @@ user:* viewer document:readme
     sel.innerHTML = used.length === 1 ? S.stores.map(opt).join('') : used.map(([k, label]) => `<optgroup label="${label}">${by(k).map(opt).join('')}</optgroup>`).join('');
     const st = activeStore();
     if (st) sel.title = `${st.name} — ${storeOrigin(st).label}${storeEdited(st) ? ', edited since' : ''} · id ${st.id}`;
+    renderShareBanner();
+  }
+  // a store opened from a share link is the visitor's own copy — say so until they dismiss it
+  function renderShareBanner() {
+    const el = $('#share-banner'), st = activeStore();
+    if (!el) return;
+    if (!st || !st.sharedKey || st.shareBannerDismissed) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = `<span><b>Your own copy</b> of a shared store. Edits are saved in this browser only — they never change the sender’s copy. To send your changes, use <b>Share</b> again.</span><button class="btn xs ghost" id="sb-more">how sharing works</button><button class="btn xs ghost icon" id="sb-x" aria-label="Dismiss">×</button>`;
+    $('#sb-more').addEventListener('click', () => Guide.open('share'));
+    $('#sb-x').addEventListener('click', () => { st.shareBannerDismissed = true; persist(); el.hidden = true; });
   }
   // ⋯ store menu: rename, duplicate, delete
   const StoreMenu = (() => {

@@ -1,5 +1,6 @@
 <title>OpenFGA Visual Playground</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<script>try{var t=localStorage.getItem('fga-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
 /*__STYLES__*/
@@ -22,8 +23,8 @@
       <div class="store-pick">
         <label for="store-select">Store</label>
         <select class="ctl" id="store-select" aria-label="Store"></select>
-        <span class="menu-wrap"><button class="btn sm icon" id="btn-store-menu" title="Rename, duplicate or delete this store" aria-haspopup="true" aria-expanded="false">⋯</button><div class="menu store-menu" id="store-menu" hidden></div></span>
-        <button class="btn sm" id="btn-new-store" title="Create a store">+ New</button>
+        <span class="menu-wrap"><button class="btn sm icon" id="btn-store-menu" aria-haspopup="true" aria-expanded="false">⋯</button><div class="menu store-menu" id="store-menu" hidden></div></span>
+        <button class="btn sm" id="btn-new-store">+ New</button>
         <span class="store-new" id="store-new">
           <input class="ctl" id="store-new-name" placeholder="Store name" maxlength="48">
           <button class="btn sm primary" id="store-new-ok">Create</button>
@@ -31,9 +32,12 @@
         </span>
       </div>
       <span class="model-badge" id="model-badge"><span class="dot"></span><span id="model-badge-text">Model</span><code id="model-badge-id"></code></span>
-      <button class="btn sm primary" id="btn-write-model" title="Write the draft as a new immutable authorization model version">Write model</button>
+      <button class="btn sm primary" id="btn-write-model">Write model</button>
     </div>
     <div class="top-right">
+      <button class="saved-pill" id="btn-saved" aria-haspopup="dialog"><i></i><span>Saved in this browser</span></button>
+      <button class="btn sm icon theme-toggle" id="btn-theme" type="button" aria-label="Theme"></button>
+      <button class="btn sm icon" id="btn-guide" aria-haspopup="dialog" aria-label="Guide: what each button does">?</button>
       <button class="btn sm" id="btn-inspector" aria-pressed="true" title="Show or hide the store inspector">Store inspector</button>
     </div>
     <nav class="mobile-nav" aria-label="Panels">
@@ -60,7 +64,7 @@
         <div class="editor-toolbar">
           <span class="meta" id="dsl-meta">schema 1.1</span>
           <span style="display:flex;gap:6px">
-            <button class="btn sm ghost" id="btn-format-dsl" title="Re-indent the DSL">Format</button>
+            <button class="btn sm ghost" id="btn-format-dsl">Format</button>
             <button class="btn sm ghost" id="btn-copy-dsl">Copy</button>
           </span>
         </div>
@@ -81,7 +85,7 @@
           <input class="ctl" id="qa-user" placeholder="user:anne" list="dl-users" aria-label="User">
           <input class="ctl" id="qa-rel" placeholder="relation" list="dl-relations" aria-label="Relation">
           <input class="ctl" id="qa-obj" placeholder="doc:roadmap" list="dl-objects" aria-label="Object">
-          <button class="btn sm primary" id="qa-add" title="Write this tuple">Write</button>
+          <button class="btn sm primary" id="qa-add">Write</button>
         </div>
         <div class="editor" id="tuples-editor">
           <div class="editor-inner">
@@ -125,7 +129,7 @@
           <button data-mode="matrix" aria-pressed="false" title="Matrix: who holds which relation on which object — direct, derived, public or excluded; click a cell for the proof or the reason it is denied">Matrix<small>who can do what?</small></button>
         </div>
         <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" hidden>subjects</button>
-        <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>
+        <button class="btn sm toggle" id="btn-connect" aria-pressed="false" hidden>⟋ connect</button>
         <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
         <label class="compare" id="res-wrap" hidden><span>relation</span><select class="ctl wide" id="res-select" title="Which relation's resolution to draw"><option value="">follow the query</option></select></label>
         <button class="btn sm toggle" id="btn-derived" aria-pressed="false" title="Materialise derived access: every subject who holds a relation without a tuple saying so, as dashed edges with the proof on hover" hidden>derived</button>
@@ -137,7 +141,7 @@
         </div>
         <div class="graph-ctl">
           <button class="btn sm icon" id="zoom-out" title="Zoom out">−</button>
-          <button class="btn sm" id="btn-reset-view" title="Reset view: show the whole graph again — clears the proof walk, focus and highlights (Esc)">⟲ Reset</button>
+          <button class="btn sm" id="btn-reset-view">⟲ Reset</button>
           <button class="btn sm" id="zoom-fit" title="Fit to view">Fit</button>
           <button class="btn sm icon" id="zoom-in" title="Zoom in">+</button>
           <button class="btn sm icon" id="btn-focus" title="Full view: hide the side panes (keyboard: f, Esc to exit)" aria-pressed="false" aria-label="Full view">⤢</button>
@@ -173,6 +177,7 @@
         <div class="node-menu ctx-menu" id="ctx-menu" hidden></div>
         <svg class="minimap" id="minimap" hidden aria-hidden="true"></svg>
         <div class="tt-banner" id="tt-banner" hidden></div>
+        <div class="share-banner" id="share-banner" hidden></div>
         <svg id="graph-svg" role="img" aria-label="Authorization graph"></svg>
         <div class="graph-tip" id="graph-tip" hidden></div>
         <div class="graph-empty" id="graph-empty" hidden></div>
@@ -211,8 +216,8 @@
           <div class="sentence" id="q-fields"></div>
           <div class="q-actions">
             <button type="submit" class="btn primary sm" id="q-run">Run</button>
-            <button type="button" class="btn sm toggle" id="q-live" aria-pressed="true" title="Re-run this query whenever the model, tuples or fields change">live</button>
-            <button type="button" class="btn sm ghost" id="q-adv-toggle" aria-expanded="false" title="Request context for conditions, and contextual tuples">context <span id="q-adv-badge" class="count"></span></button>
+            <button type="button" class="btn sm toggle" id="q-live" aria-pressed="true">live</button>
+            <button type="button" class="btn sm ghost" id="q-adv-toggle" aria-expanded="false">context <span id="q-adv-badge" class="count"></span></button>
           </div>
           <div class="adv-body" id="q-adv" hidden>
             <div class="field">
@@ -275,7 +280,53 @@
 <datalist id="dl-users"></datalist>
 <datalist id="dl-relations"></datalist>
 <datalist id="dl-objects"></datalist>
+<script>
+(function () {
+  var order = ['system', 'light', 'dark'], icon = { system: '\u25d0', light: '\u2600', dark: '\u263e' }, label = { system: 'Theme: follows your system', light: 'Theme: light', dark: 'Theme: dark' };
+  function get() { try { var t = localStorage.getItem('fga-theme'); return t === 'light' || t === 'dark' ? t : 'system'; } catch (e) { return 'system'; } }
+  function apply(t) {
+    if (t === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+    try { if (t === 'system') localStorage.removeItem('fga-theme'); else localStorage.setItem('fga-theme', t); } catch (e) {}
+    Array.prototype.forEach.call(document.querySelectorAll('.theme-toggle'), function (b) { b.textContent = icon[t]; b.title = label[t] + ' \u2014 click to switch'; b.setAttribute('aria-label', label[t]); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.theme-toggle'), function (b) { b.addEventListener('click', function () { apply(order[(order.indexOf(get()) + 1) % order.length]); }); });
+  apply(get());
+})();
+</script>
 <div class="toast" id="toast" hidden></div>
+<div class="ui-tip" id="ui-tip" role="tooltip" hidden></div>
+<div class="guide-overlay" id="guide" hidden>
+  <div class="guide" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+    <div class="guide-head"><h2 id="guide-title">How the playground works</h2><button class="btn sm ghost icon" id="guide-close" aria-label="Close">×</button></div>
+    <div class="guide-body">
+      <section id="guide-data">
+        <h3>Where your data lives</h3>
+        <ul class="g-facts">
+          <li><b class="g-yes">Saved automatically, in this browser only.</b> Every store, model, tuple and assertion is kept in this browser’s local storage on this device. There is no account and no server copy.</li>
+          <li><b class="g-no">Nothing here touches a real OpenFGA server.</b> “Write model”, “Write” and “delete” imitate the OpenFGA APIs on your local copy.</li>
+          <li><b class="g-no">Other browsers and devices don’t see it.</b> A private window, another browser or another laptop starts empty.</li>
+          <li><b class="g-warn">Clearing this site’s data deletes your stores.</b> To keep or move one, use Share (a link) or the store export in the inspector.</li>
+        </ul>
+      </section>
+      <section id="guide-share">
+        <h3>Sharing</h3>
+        <ul class="g-facts">
+          <li><b class="g-yes">Share copies a link with a snapshot</b> of this store — model, tuples, assertions and the current query — packed into the link itself.</li>
+          <li><b class="g-no">Opening a shared link never changes the sender’s store.</b> It creates <i>your own copy</i> in your browser. Your edits stay with you; theirs stay with them.</li>
+          <li><b class="g-no">A link doesn’t update.</b> If you change the store, Share again and send the new link.</li>
+          <li><b class="g-warn">Anyone with the link can read everything in it.</b> Don’t put secrets or real personal data in a shared store.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What each button does — and doesn’t</h3>
+        <table class="g-table">
+          <thead><tr><th>Button</th><th>Does</th><th>Doesn’t</th></tr></thead>
+          <tbody id="guide-rows"></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>

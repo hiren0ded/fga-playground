@@ -42,7 +42,7 @@
         const url = await link(extra);
         if (!url) return;
         const kb = (url.length / 1024).toFixed(1);
-        copyText(url, `${label || 'Share link'} (${kb} KB) copied`);
+        copyText(url, `${label || 'Share link'} (${kb} KB) copied — a snapshot: later edits won’t change it, and whoever opens it gets their own copy`);
         if (url.length > 30000) setTimeout(() => toast('Long link: some chat apps truncate URLs this size — the store JSON export is safer there'), 2800);
       } catch (e) { toast(`Could not build the link: ${e.message}`); }
     }
@@ -71,14 +71,13 @@
       if (['schema', 'model', 'data', 'matrix'].includes(view)) setGraphMode(view);
       switchStore(st.id);
       if (ex && view === 'matrix') { S.ui.mxWalk = Object.assign(S.ui.mxWalk || {}, { view: ex.mx === 'tree' ? 'tree' : 'matrix' }); S.ui.matrix = { type: ex.object.split(':')[0], relation: ex.relation }; Matrix.openWalk(ex.user, ex.relation, ex.object); }
-      toast(`Opened shared store “${st.name}” — it is saved in this browser like any other store`);
+      toast(`Opened “${st.name}” as your own copy — your edits stay in this browser and never change the sender’s store`);
       return true;
     }
     const btn = document.createElement('button');
     btn.className = 'btn sm';
     btn.id = 'btn-share';
     btn.textContent = 'Share';
-    btn.title = 'Copy a link that opens this store anywhere: model, tuples, assertions and the current query live in the link itself, nothing is uploaded';
     const anchor = $('#btn-write-model');
     anchor.parentNode.insertBefore(btn, anchor.nextSibling);
     btn.addEventListener('click', () => copy());
