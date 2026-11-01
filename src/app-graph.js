@@ -477,6 +477,9 @@
 
     // ── sizes
     const CARD_W_MAX = 380, HDR = 28, ROW = 19;
+    // the "open as card" control is a full-height strip at the node's right edge, set off by a divider, so
+    // a click meant for it can't land on the node body by accident (and the other way round)
+    const TOG_W = 26;
     function sizeNode(n) {
       if (n.kind === 'card') {
         const rows = n.collapsed ? [] : n.rows;
@@ -516,7 +519,7 @@
       }
       if (n.kind === 'group' || n.kind === 'bundle') { n.width = Math.ceil(measure(n.label, MONO)) + 50; n.height = 34; return; }
       n.moreW = n.more ? Math.ceil(measure(`+${n.more}`, MONO_S)) + 14 : 0;
-      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0) + (n.expandable ? 18 : 0) + (n.moreW ? n.moreW + 6 : 0);
+      n.width = Math.ceil(measure(n.label, MONO)) + 28 + (n.kind === 'wildcard' ? 14 : 0) + (n.expandable ? TOG_W : 0) + (n.moreW ? n.moreW + 6 : 0);
       n.height = 30;
     }
     // y of a slot row's centre, relative to the card's top edge
@@ -1077,6 +1080,8 @@
         .on('mouseenter', function (ev, e) {
           d3.select(this).classed('hover', true).raise();
           showTip(ev, tipForEdge(e));
+          // a grouped edge stands for several relations: no single proof to preview, the tooltip lists them
+          if (e.access && e.allRels && e.allRels.length > 1) return;
           if (e.access) { const steps = stepsFor(e); if (steps && !proofWalk) { proofPreview = { steps, title: `${e.user} ${e.relation} ${e.object}` }; applyVisual(); } return; }
           if (!focus && !proofWalk) { hoverHl = edgeHl(e); applyVisual(); }
         })
@@ -1158,16 +1163,19 @@
       sel.append('text').attr('x', n.badge ? 6 + n.badgeW + 8 : n.op ? 12 : n.width / 2).attr('y', n.height / 2 + 4).attr('text-anchor', n.op || n.badge ? 'start' : 'middle').text(label);
       if (n.op) sel.append('text').attr('class', 'op').attr('x', n.width - 10).attr('y', n.height / 2 + 4).attr('text-anchor', 'end').text(n.op === 'or' ? '∨' : n.op === 'and' ? '∧' : '¬');
       if (n.expandable) {
-        sel.select('text').attr('x', (n.width - 18) / 2);
-        const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 20},${n.height / 2 - 6})`).style('cursor', 'pointer');
-        tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
-        tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('+');
+        sel.select('text').attr('x', (n.width - TOG_W) / 2);
+        const tog = sel.append('g').attr('class', 'card-toggle strip').attr('transform', `translate(${n.width - TOG_W},0)`).style('cursor', 'pointer');
+        tog.append('path').attr('class', 'tog-bg').attr('d', `M0,0 H${TOG_W - 7} a7,7 0 0 1 7,7 V${n.height - 7} a7,7 0 0 1 -7,7 H0 z`);
+        tog.append('line').attr('class', 'tog-div').attr('x1', 0).attr('x2', 0).attr('y1', 5).attr('y2', n.height - 5);
+        tog.append('rect').attr('class', 'tog-hit').attr('x', 0).attr('y', -4).attr('width', TOG_W + 6).attr('height', n.height + 8).attr('fill', 'transparent');
+        tog.append('rect').attr('class', 'tog-box').attr('x', TOG_W / 2 - 6).attr('y', n.height / 2 - 6).attr('width', 12).attr('height', 12).attr('rx', 3);
+        tog.append('text').attr('x', TOG_W / 2).attr('y', n.height / 2 + 3.5).attr('text-anchor', 'middle').text('+');
         tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; toggleCard(n.id, true); })
-          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">open ${esc(n.id)} as a card: one slot per relation, tuples pointing at the slot they grant</div>`); });
+          .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<b>+ open as card</b><div class="sub">show ${esc(n.id)} as a card: one row per relation, tuples pointing at the row they grant. Clicking the name instead selects the node.</div>`); });
       }
       if (n.more) {
-        sel.select('text').attr('x', (n.width - n.moreW - 6 - (n.expandable ? 18 : 0)) / 2);
-        const mx = n.width - n.moreW - 4 - (n.expandable ? 20 : 0);
+        sel.select('text').attr('x', (n.width - n.moreW - 6 - (n.expandable ? TOG_W : 0)) / 2);
+        const mx = n.width - n.moreW - 4 - (n.expandable ? TOG_W + 2 : 0);
         const mg = sel.append('g').attr('class', 'more').attr('transform', `translate(${mx},${n.height / 2 - 8})`).style('cursor', 'pointer');
         mg.append('rect').attr('width', n.moreW).attr('height', 16).attr('rx', 8);
         mg.append('text').attr('x', n.moreW / 2).attr('y', 11.5).attr('text-anchor', 'middle').text(`+${n.more}`);
@@ -1182,14 +1190,17 @@
       sel.append('rect').attr('class', 'bg').attr('width', n.width).attr('height', n.height).attr('rx', 10);
       sel.append('path').attr('class', 'hdr').attr('d', `M10,0 H${n.width - 10} a10,10 0 0 1 10,10 V${HDR} H0 V10 a10,10 0 0 1 10,-10 z`);
       sel.append('text').attr('class', 'hdr-t').attr('x', 12).attr('y', 18.5).text(n.label);
-      sel.append('text').attr('class', 'hdr-n').attr('x', n.width - 26).attr('y', 18.5).attr('text-anchor', 'end').text(n.type);
-      const tog = sel.append('g').attr('class', 'card-toggle').attr('transform', `translate(${n.width - 18},8)`).style('cursor', 'pointer');
-      tog.append('rect').attr('width', 12).attr('height', 12).attr('rx', 3);
-      tog.append('text').attr('x', 6).attr('y', 9.5).attr('text-anchor', 'middle').text('–');
+      sel.append('text').attr('class', 'hdr-n').attr('x', n.width - TOG_W - 6).attr('y', 18.5).attr('text-anchor', 'end').text(n.type);
+      const tog = sel.append('g').attr('class', 'card-toggle strip').attr('transform', `translate(${n.width - TOG_W},0)`).style('cursor', 'pointer');
+      tog.append('path').attr('class', 'tog-bg').attr('d', `M0,0 H${TOG_W - 10} a10,10 0 0 1 10,10 V${HDR} H0 z`);
+      tog.append('line').attr('class', 'tog-div').attr('x1', 0).attr('x2', 0).attr('y1', 5).attr('y2', HDR - 5);
+      tog.append('rect').attr('class', 'tog-hit').attr('x', 0).attr('y', -4).attr('width', TOG_W + 6).attr('height', HDR + 4).attr('fill', 'transparent');
+      tog.append('rect').attr('class', 'tog-box').attr('x', TOG_W / 2 - 6).attr('y', HDR / 2 - 6).attr('width', 12).attr('height', 12).attr('rx', 3);
+      tog.append('text').attr('x', TOG_W / 2).attr('y', HDR / 2 + 3.5).attr('text-anchor', 'middle').text('–');
       tog.on('click', (ev) => { ev.stopPropagation(); hideTip(); if (locked()) return; toggleCard(n.id, false); })
-        .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<div class="sub">collapse ${esc(n.id)} back to a plain node</div>`); });
+        .on('mouseenter', (ev) => { ev.stopPropagation(); showTip(ev, `<b>– close card</b><div class="sub">collapse ${esc(n.id)} back to a small node</div>`); });
       if (n.pinned) sel.append('circle').attr('class', 'pin').attr('cx', n.width - 4).attr('cy', 4).attr('r', 3);
-      sel.append('rect').attr('class', 'hdr-hit').attr('width', n.width - 30).attr('height', HDR).attr('fill', 'transparent')
+      sel.append('rect').attr('class', 'hdr-hit').attr('width', n.width - TOG_W).attr('height', HDR).attr('fill', 'transparent')
         .on('mouseenter', (ev) => { showTip(ev, tipForNode(plain)); previewFocus(n.id); emit('nodeHover', n.id); }).on('mousemove', moveTip).on('mouseleave', () => { hideTip(); previewFocus(null); emit('nodeHover', null); })
         .on('click', (ev) => { if (ev.defaultPrevented) return; hideTip(); ev.stopPropagation(); if (locked()) return; setFocus(n.id, plain, ev); })
         .on('dblclick', (ev) => { hideTip(); ev.stopPropagation(); if (locked()) return; emit('nodeClick', plain, 'data', ev); })
@@ -1526,6 +1537,7 @@
       const walk = mode === 'data' ? (proofWalk || proofPreview) : null;
       if (walk) { paint(proofHlOf(walk.steps), { stepping: true, proof: true }); placeBadges(); if (wasIsolated) fit(true); return; }
       gBadges.selectAll('*').remove();
+      if (tipFromBadge) { hideTip(); tipFromBadge = false; }
       if (focus) {
         let hl;
         if (focus.pathIdx >= 0 && focus.paths && focus.paths[focus.pathIdx]) { const p = focus.paths[focus.pathIdx]; const nodes = {}, edges = {}; p.nodes.forEach((n, i) => { nodes[n] = i === 0 || i === p.nodes.length - 1 ? 'active' : 'ok'; }); p.edges.forEach((e) => { edges[e] = 'ok'; }); hl = toHl({ nodes, edges }); }
@@ -1843,10 +1855,14 @@
       if (st.kind === 'direct' || st.kind === 'noparent') return slotPos(st.to, byId, 'left');
       return null;
     }
+    let tipFromBadge = false;
     function placeBadges() {
       gBadges.selectAll('*').remove();
       const walk = proofWalk || proofPreview;
-      if (!walk || !curL || mode !== 'data') return;
+      // hover-preview badges are a picture only: they must not catch the pointer (their tooltip would
+      // outlive the preview and look stuck); a pinned walk's badges are interactive
+      gBadges.style('pointer-events', proofWalk ? null : 'none');
+      if (!walk || !curL || mode !== 'data') { if (tipFromBadge) { hideTip(); tipFromBadge = false; } return; }
       const placed = [];
       walk.steps.forEach((st) => {
         const p = stepAnchor(st); if (!p) return;
@@ -1857,7 +1873,7 @@
         const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}${st.ok === false || st.excluded ? ' fail' : ''}`).attr('transform', `translate(${x},${p.y})`);
         g.append('circle').attr('r', 9);
         g.append('text').attr('y', 3.5).attr('text-anchor', 'middle').text(st.n);
-        g.on('mouseenter', (ev) => showTip(ev, `<code>${st.n}. ${esc(st.text)}</code><div class="sub">${esc(st.why || '')}</div>`)).on('mousemove', moveTip).on('mouseleave', hideTip);
+        g.on('mouseenter', (ev) => { tipFromBadge = true; showTip(ev, `<code>${st.n}. ${esc(st.text)}</code><div class="sub">${esc(st.why || '')}</div>`); }).on('mousemove', moveTip).on('mouseleave', () => { tipFromBadge = false; hideTip(); });
       });
     }
     function panToPoint(x, y, animate = true) {

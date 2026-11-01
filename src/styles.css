@@ -788,8 +788,14 @@ svg.has-hl .card.inst.hl .row:not(.hl) text { opacity: 1; }
 svg.has-hl.stepping:not(.focusing) .card.inst.hl .row:not(.hl) text { opacity: 0.45; }
 svg.has-hl.stepping:not(.focusing) .card.inst.hl path.ilink:not(.hl) { opacity: 0.35; }
 .edge.ttu text { fill: var(--edge-ttu); }
-.node.object .card-toggle { opacity: 0.55; transition: opacity 0.15s; }
-.node.object:hover .card-toggle { opacity: 1; }
+.card-toggle rect.tog-hit { fill: transparent; stroke: none; }
+.card-toggle.strip .tog-bg { fill: transparent; transition: fill 0.12s; }
+.card-toggle.strip .tog-div { stroke: var(--line-2); stroke-width: 1; }
+.card-toggle.strip:hover .tog-bg { fill: var(--accent); fill-opacity: 0.18; }
+.card-toggle.strip:hover .tog-box { stroke: var(--accent); }
+.card-toggle.strip:hover text { fill: var(--accent); }
+.node.object .card-toggle .tog-box, .node.object .card-toggle text { opacity: 0.6; transition: opacity 0.15s; }
+.node.object:hover .card-toggle .tog-box, .node.object:hover .card-toggle text { opacity: 1; }
 
 /* ── derived access (materialised grants) */
 .edge.derived path.main { stroke: var(--e, var(--fg-3)); stroke-dasharray: 1.5 4.5; stroke-linecap: round; opacity: 0.85; }
