@@ -247,6 +247,7 @@ user:* viewer document:readme
     dslEditor.setMarks(S.parsed.errors.map((e) => e.line), S.parsed.warnings.map((w) => w.line).concat((S.lint || []).filter((l) => l.sev === 'warn').map((l) => l.line)));
     renderDiags($('#dsl-diags'), S.parsed.errors, S.parsed.warnings, dslEditor, S.model.types.length ? `Model OK — ${S.model.types.length} type${S.model.types.length === 1 ? '' : 's'}, ${S.model.types.reduce((n, t) => n + t.relations.length, 0)} relations${S.model.conditions.length ? ', ' + S.model.conditions.length + ' condition' + (S.model.conditions.length === 1 ? '' : 's') : ''}` : '', S.lint);
     renderHealth();
+    renderStoreSelect(); maybeRenameHint();
     NodeMenu.close();
     tuplesEditor.setMarks(S.tuplesParsed.errors.map((e) => e.line), S.tuplesParsed.rejected.map((r) => r.line));
     renderDiags($('#tuples-diags'), S.tuplesParsed.errors, S.tuplesParsed.rejected.map((r) => ({ line: r.line, message: `rejected: ${r.message}` })), tuplesEditor, '');
@@ -1020,13 +1021,98 @@ user:* viewer document:readme
       wrap.appendChild(card);
     });
     $$('[data-open]', wrap).forEach((b) => b.addEventListener('click', () => { const st = S.stores.find((s) => s.exampleId === b.dataset.open); switchStore(st.id); setEditorTab('dsl'); }));
-    $$('[data-fresh]', wrap).forEach((b) => b.addEventListener('click', () => { const ex = FGA_EXAMPLES.find((x) => x.id === b.dataset.fresh); const n = S.stores.filter((s) => s.exampleId === ex.id).length; const st = makeStore(n ? `${ex.name} (${n + 1})` : ex.name, { dsl: ex.dsl, tuples: ex.tuples, assertions: ex.assertions, queries: ex.queries, exampleId: ex.id }); S.stores.push(st); switchStore(st.id); setEditorTab('dsl'); toast(`Created store “${st.name}” with model v1 written`); }));
+    $$('[data-fresh]', wrap).forEach((b) => b.addEventListener('click', () => { const ex = FGA_EXAMPLES.find((x) => x.id === b.dataset.fresh); const st = makeStore(uniqueStoreName(ex.name), { dsl: ex.dsl, tuples: ex.tuples, assertions: ex.assertions, queries: ex.queries, exampleId: ex.id }); S.stores.push(st); switchStore(st.id); setEditorTab('dsl'); toast(`Created store “${st.name}” with model v1 written`); }));
   }
 
   // ───────────────────────── stores UI ─────────────────────────
+  // where a store came from, and whether it still matches that origin
+  function storeOrigin(st) {
+    if (st.sharedKey) return { kind: 'shared', label: 'opened from a share link' };
+    const ex = st.exampleId && FGA_EXAMPLES.find((x) => x.id === st.exampleId);
+    if (ex) return { kind: 'example', label: `from the “${ex.name}” example`, ex };
+    return { kind: 'own', label: 'your store' };
+  }
+  function storeEdited(st) {
+    const o = storeOrigin(st);
+    const norm = (x) => String(x || '').replace(/\s+$/gm, '').trim();
+    if (o.kind === 'example') return norm(st.draftDsl) !== norm(o.ex.dsl) || norm(st.tuplesText) !== norm(o.ex.tuples);
+    if (o.kind === 'shared') return !!st.originDigest && st.originDigest !== hashStr(norm(st.draftDsl) + '\u0000' + norm(st.tuplesText));
+    return false;
+  }
+  function uniqueStoreName(base, exceptId) {
+    const taken = new Set(S.stores.filter((s) => s.id !== exceptId).map((s) => s.name.toLowerCase()));
+    if (!taken.has(base.toLowerCase())) return base;
+    for (let i = 2; i < 999; i++) { const n = `${base} (${i})`; if (!taken.has(n.toLowerCase())) return n; }
+    return `${base} ${Date.now()}`;
+  }
   function renderStoreSelect() {
     const sel = $('#store-select');
-    sel.innerHTML = S.stores.map((s) => `<option value="${esc(s.id)}"${s.id === S.activeStoreId ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    // a renamed store is the user's own now, whatever it was copied from
+    const groupOf = (s) => (s.renamed ? 'own' : storeOrigin(s).kind);
+    const opt = (s) => { const tag = groupOf(s) === 'own' ? '' : storeEdited(s) ? ' · edited' : ''; return `<option value="${esc(s.id)}"${s.id === S.activeStoreId ? ' selected' : ''}>${esc(s.name)}${tag}</option>`; };
+    const groups = [['own', 'Your stores'], ['example', 'From examples'], ['shared', 'Opened from share links']];
+    const by = (k) => S.stores.filter((s) => groupOf(s) === k);
+    const used = groups.filter(([k]) => by(k).length);
+    sel.innerHTML = used.length === 1 ? S.stores.map(opt).join('') : used.map(([k, label]) => `<optgroup label="${label}">${by(k).map(opt).join('')}</optgroup>`).join('');
+    const st = activeStore();
+    if (st) sel.title = `${st.name} — ${storeOrigin(st).label}${storeEdited(st) ? ', edited since' : ''} · id ${st.id}`;
+  }
+  // ⋯ store menu: rename, duplicate, delete
+  const StoreMenu = (() => {
+    const menu = $('#store-menu'), btn = $('#btn-store-menu');
+    function close() { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    function open(mode) {
+      const st = activeStore(); if (!st) return;
+      const o = storeOrigin(st), edited = storeEdited(st);
+      menu.hidden = false; btn.setAttribute('aria-expanded', 'true');
+      if (mode === 'delete') {
+        menu.innerHTML = `<div class="menu-title">Delete “${esc(st.name)}”?</div><div class="sm-note">Its model versions, ${S.tuplesParsed.tuples.length} tuples and ${st.assertions.length} assertions are removed from this browser. This cannot be undone.</div><div class="sm-row"><button class="btn sm danger" id="sm-del-yes">Delete store</button><button class="btn sm ghost" id="sm-cancel">Cancel</button></div>`;
+        $('#sm-del-yes').addEventListener('click', () => { close(); deleteStore(st.id); });
+        $('#sm-cancel').addEventListener('click', () => open());
+        return;
+      }
+      menu.innerHTML = `<div class="menu-title">Store name</div><div class="sm-row"><input class="ctl" id="sm-name" value="${esc(st.name)}" maxlength="60" spellcheck="false"><button class="btn sm primary" id="sm-save">Rename</button></div><div class="sm-note">${esc(o.label)}${edited ? ' · <b>edited since</b> — a new name will keep it apart' : ''}<br><span class="sm-id">id ${esc(st.id)}</span></div><button class="menu-item" id="sm-dup">Duplicate store</button>${o.kind === 'example' && edited ? `<button class="menu-item" id="sm-fresh">Open a fresh “${esc(o.ex.name)}” example</button>` : ''}<button class="menu-item danger" id="sm-del">Delete store…</button>`;
+      const input = $('#sm-name');
+      const save = () => { const name = input.value.trim(); if (!name) { input.focus(); return; } renameStore(st.id, name); close(); };
+      $('#sm-save').addEventListener('click', save);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') close(); });
+      $('#sm-dup').addEventListener('click', () => { close(); duplicateStore(st.id); });
+      const fr = $('#sm-fresh'); if (fr) fr.addEventListener('click', () => { close(); const ex = o.ex; const n = makeStore(uniqueStoreName(ex.name), { dsl: ex.dsl, tuples: ex.tuples, assertions: ex.assertions, queries: ex.queries, exampleId: ex.id }); S.stores.push(n); switchStore(n.id); toast(`Opened a fresh copy of the “${ex.name}” example`); });
+      $('#sm-del').addEventListener('click', () => open('delete'));
+      if (mode === 'rename') { input.focus(); input.select(); }
+    }
+    btn.addEventListener('click', (ev) => { ev.stopPropagation(); if (menu.hidden) open(); else close(); });
+    menu.addEventListener('click', (ev) => ev.stopPropagation());
+    document.addEventListener('click', (ev) => { if (!menu.hidden && !ev.target.closest('#store-menu') && !ev.target.closest('#btn-store-menu')) close(); });
+    return { open, close };
+  })();
+  function renameStore(id, name) {
+    const st = S.stores.find((s) => s.id === id); if (!st) return;
+    const clash = S.stores.some((s) => s.id !== id && s.name.toLowerCase() === name.toLowerCase());
+    st.name = name; st.updated_at = new Date().toISOString(); st.renamed = true;
+    renderStoreSelect(); Inspector.refresh(); persist();
+    toast(clash ? `Renamed to “${name}” — another store has the same name` : `Renamed to “${name}”`);
+  }
+  function duplicateStore(id) {
+    const src = S.stores.find((s) => s.id === id); if (!src) return;
+    const n = makeStore(uniqueStoreName(`${src.name} copy`), { dsl: src.draftDsl, tuples: src.tuplesText, assertions: src.assertions, queries: src.queries });
+    S.stores.push(n); switchStore(n.id);
+    toast(`Duplicated as “${n.name}” — model, tuples and assertions copied`);
+  }
+  function deleteStore(id) {
+    const st = S.stores.find((s) => s.id === id); if (!st) return;
+    S.stores = S.stores.filter((s) => s.id !== id);
+    if (!S.stores.length) S.stores.push(makeStore('My store'));
+    switchStore(S.stores[S.stores.length - 1].id);
+    toast(`Deleted store “${st.name}”`);
+  }
+  // the first edit to an example or shared store that still carries its original name: suggest a rename
+  function maybeRenameHint() {
+    const st = activeStore(); if (!st || st.renamed || st.renameHinted) return;
+    if (storeOrigin(st).kind === 'own' || !storeEdited(st)) return;
+    st.renameHinted = true; persist();
+    toast(`You're editing “${st.name}” — rename it from the ⋯ next to the store name so it's easy to tell apart`);
+    const b = $('#btn-store-menu'); b.classList.add('pulse'); setTimeout(() => b.classList.remove('pulse'), 4000);
   }
   function switchStore(id) {
     Query.stopPlay();
@@ -1072,7 +1158,7 @@ user:* viewer document:readme
   $('#btn-new-store').addEventListener('click', () => { $('#store-new').classList.add('open'); $('#btn-new-store').hidden = true; $('#store-new-name').value = ''; $('#store-new-name').focus(); });
   const closeNew = () => { $('#store-new').classList.remove('open'); $('#btn-new-store').hidden = false; };
   $('#store-new-cancel').addEventListener('click', closeNew);
-  const createNew = () => { const name = $('#store-new-name').value.trim() || `Store ${S.stores.length + 1}`; const st = makeStore(name); S.stores.push(st); closeNew(); switchStore(st.id); toast(`Created store “${name}” (id ${shortId(st.id)})`); };
+  const createNew = () => { const name = uniqueStoreName($('#store-new-name').value.trim() || `Store ${S.stores.length + 1}`); const st = makeStore(name); S.stores.push(st); closeNew(); switchStore(st.id); toast(`Created store “${name}” (id ${shortId(st.id)})`); };
   $('#store-new-ok').addEventListener('click', createNew);
   $('#store-new-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); createNew(); } if (e.key === 'Escape') closeNew(); });
   $('#btn-write-model').addEventListener('click', () => { const st = activeStore(); const v = writeModelVersion(st, st.draftDsl); if (v) { toast(`Wrote model v${st.models.length} · ${shortId(v.id)}`); updateModelBadge(); Inspector.refreshIf('models', 'api', 'json', 'cli'); Assertions.render(); persist(); } });
@@ -1886,6 +1972,12 @@ user:* viewer document:readme
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
     if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
     if (S.ui.proofOrder) Graph.setProofOrder(S.ui.proofOrder);
+    // older versions could create stores with the same name (an example and a shared copy of it)
+    const seenNames = new Set();
+    S.stores.slice().sort((a, b) => (a.sharedKey ? 1 : 0) - (b.sharedKey ? 1 : 0)).forEach((st) => {
+      if (seenNames.has(st.name.toLowerCase())) st.name = uniqueStoreName(st.sharedKey ? `${st.name} (shared)` : st.name, st.id);
+      seenNames.add(st.name.toLowerCase());
+    });
     // deep links from the static pages: /playground?example=drive&view=matrix
     const qs = new URLSearchParams(location.search);
     const exId = qs.get('example'), view = qs.get('view');

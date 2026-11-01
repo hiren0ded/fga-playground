@@ -56,8 +56,12 @@
       const key = `shared:${hashStr(m[1])}`;
       let st = S.stores.find((s) => s.sharedKey === key);
       if (!st) {
-        st = makeStore(String(p.name || 'Shared store'), { dsl: p.dsl, tuples: typeof p.tuples === 'string' ? p.tuples : '', assertions: Array.isArray(p.assertions) ? p.assertions : [], queries: Array.isArray(p.queries) ? p.queries : [] });
+        const base = String(p.name || 'Shared store');
+        const taken = S.stores.some((x) => x.name.toLowerCase() === base.toLowerCase());
+        st = makeStore(uniqueStoreName(taken ? `${base} (shared)` : base), { dsl: p.dsl, tuples: typeof p.tuples === 'string' ? p.tuples : '', assertions: Array.isArray(p.assertions) ? p.assertions : [], queries: Array.isArray(p.queries) ? p.queries : [] });
         st.sharedKey = key;
+        const norm = (x) => String(x || '').replace(/\s+$/gm, '').trim();
+        st.originDigest = hashStr(norm(st.draftDsl) + '\u0000' + norm(st.tuplesText));
         S.stores.push(st);
       }
       const ex = p.explain && typeof p.explain === 'object' && p.explain.user && p.explain.relation && p.explain.object ? p.explain : null;

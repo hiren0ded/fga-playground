@@ -982,3 +982,14 @@ details.pt-more > summary:hover { color: var(--fg); }
 .brand-name .brand-pg { font-weight: 500; color: var(--fg-3); }
 .brand-sub a { color: var(--fg-2); text-decoration: none; }
 .brand-sub a:hover { color: var(--fg); text-decoration: underline; }
+
+/* store menu */
+.store-menu { left: 0; right: auto; min-width: 290px; }
+.store-menu .sm-row { display: flex; gap: 6px; align-items: center; padding: 2px 6px; }
+.store-menu .sm-row input { flex: 1 1 auto; min-width: 0; }
+.store-menu .sm-note { padding: 2px 6px 6px; font-size: 11.5px; color: var(--fg-3); line-height: 1.45; }
+.store-menu .sm-note b { color: var(--warn); font-weight: 600; }
+.store-menu .sm-id { font-family: var(--font-mono); font-size: 10.5px; }
+.menu-item.danger { color: var(--bad); }
+#btn-store-menu.pulse { animation: sm-pulse 1s ease-in-out 3; border-color: var(--accent); }
+@keyframes sm-pulse { 50% { box-shadow: 0 0 0 4px var(--accent-soft); } }
