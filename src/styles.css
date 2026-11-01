@@ -576,6 +576,10 @@ svg.has-hl .card.hl .row:not(.hl) text { opacity: 0.5; }
 .edge.hl-out path:not(.hit) { stroke: var(--accent); stroke-width: 2.6; }
 .edge.hl-in path:not(.hit) { stroke: var(--read); stroke-width: 2.6; }
 .edge.hl-out text, .edge.hl-in text { fill: var(--fg); font-weight: 600; }
+/* arrowheads: one marker per edge kind / highlight state (the per-relation ones are coloured inline) */
+.mk { fill: var(--edge-direct); }
+.mk-direct { fill: var(--edge-direct); } .mk-computed { fill: var(--edge-computed); } .mk-ttu { fill: var(--edge-ttu); } .mk-exclusion { fill: var(--bad); }
+.mk-active { fill: var(--accent); } .mk-read { fill: var(--read); } .mk-ok { fill: var(--ok); } .mk-fail { fill: var(--bad); } .mk-skip { fill: var(--fg-3); }
 .mk-in { fill: var(--read); } .mk-out { fill: var(--accent); }
 .card.hl-in rect.bg { stroke: var(--read); stroke-width: 2; } .card.hl-out rect.bg { stroke: var(--accent); stroke-width: 2; }
 svg.focusing .node.hl-active rect { stroke-width: 3; }

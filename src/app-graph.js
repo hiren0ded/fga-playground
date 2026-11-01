@@ -154,7 +154,7 @@
     const defs = svg.append('defs');
     const MARKERS = ['direct', 'computed', 'ttu', 'tree', 'exclusion', 'active', 'read', 'ok', 'fail', 'skip', 'in', 'out', 'ghost', 'added', 'removed'];
     MARKERS.forEach((k) => {
-      defs.append('marker').attr('id', `arrow-${k}`).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 9).attr('markerHeight', 9).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
+      defs.append('marker').attr('id', `arrow-${k}`).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 11).attr('markerHeight', 11).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
         .append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('class', `mk mk-${k}`);
       defs.append('marker').attr('id', `arrow-s-${k}`).attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
         .append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('class', `mk mk-${k}`);
@@ -684,7 +684,7 @@
       if (mode === 'data') {
         Array.from(new Set(L.edges.map((e) => e.rel))).forEach((r) => {
           const id = `arrow-rel-${(relIndex.has(r) ? relIndex.get(r) : hashStr(r)) % REL_PALETTE.length}`;
-          if (defs.select(`#${id}`).empty()) defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 9).attr('markerHeight', 9).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('fill', relColor(r));
+          if (defs.select(`#${id}`).empty()) defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 11).attr('markerHeight', 11).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('fill', relColor(r));
           // hollow variant for derived (materialised) access
           const hid = id.replace('arrow-rel-', 'arrow-relh-');
           if (defs.select(`#${hid}`).empty()) defs.append('marker').attr('id', hid).attr('viewBox', '0 0 12 12').attr('refX', 10).attr('refY', 6).attr('markerWidth', 11).attr('markerHeight', 11).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M1.5,1.5 L10.5,6 L1.5,10.5 z').attr('class', 'mk-hollow').attr('stroke', relColor(r));
