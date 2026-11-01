@@ -804,7 +804,8 @@
       items.sort((a, b) => b.prio - a.prio || a.w - b.w);
       const placed = [];
       items.forEach((it) => {
-        const path = it.el.querySelector('path.main');
+        // the hit path gets its final geometry at once; path.main may still be animating from the old layout
+        const path = it.el.querySelector('path.hit') || it.el.querySelector('path.main');
         let total = 0; try { total = path.getTotalLength(); } catch (err) { total = 0; }
         const cands = [it.e.mid];
         if (total > 40) [0.35, 0.65, 0.22, 0.78].forEach((t) => { try { const p = path.getPointAtLength(total * t); cands.push({ x: p.x, y: p.y }); } catch (err) { /* ignore */ } });
