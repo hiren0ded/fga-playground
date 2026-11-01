@@ -895,27 +895,30 @@
     return r;
   }
 
-  function evalRewrite(ctx, frame, node, user, relation, object, path, depth) {
+  // `rp` is the position of `node` inside the relation's rewrite tree (child indices from the root);
+  // trace events carry it as hl.rewrites so the resolution view can light up the branch being walked.
+  function evalRewrite(ctx, frame, node, user, relation, object, path, depth, rp = []) {
     const T = ctx.trace;
     const modelNode = relNode(object.type, relation);
     const idsOf = (tuples) => Object.fromEntries(tuples.map((t) => [`t${t.id}`, 'read']));
+    const rk = (p, st) => ({ [`${modelNode}|${p.join('.')}`]: st });
     switch (node.kind) {
       case 'this': {
         const tuples = ctx.store.read(object.raw, relation);
         T.reads++;
-        T.emit('read', frame, `Direct assignment ${describeRewrite(node)} → read tuples where object = ${object.raw} and relation = ${relation}: ${tuples.length ? tuples.length + ' found' : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
+        T.emit('read', frame, `Direct assignment ${describeRewrite(node)} → read tuples where object = ${object.raw} and relation = ${relation}: ${tuples.length ? tuples.length + ' found' : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
         let cycle = false;
         for (const t of tuples) {
           const tu = t.user;
           const uNode = tu.wildcard ? `${tu.type}:*` : `${tu.type}:${tu.id}`;
           if (tu.raw === user.raw) {
             if (!condStep(ctx, frame, t).ok) continue;
-            T.emit('match', frame, `${arrowTuple(t)} matches ${user.raw} directly`, { status: 'ok', hl: { dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+            T.emit('match', frame, `${arrowTuple(t)} matches ${user.raw} directly`, { status: 'ok', hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
             return { value: true, cycle, via: 'a direct tuple', proof: { kind: 'direct', tuple: t, relation, object: object.raw } };
           }
           if (tu.wildcard && !user.relation && tu.type === user.type) {
             if (!condStep(ctx, frame, t).ok) continue;
-            T.emit('match', frame, `${arrowTuple(t)} is a public (wildcard) grant for every ${tu.type} → it covers ${user.raw}`, { status: 'ok', hl: { dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+            T.emit('match', frame, `${arrowTuple(t)} is a public (wildcard) grant for every ${tu.type} → it covers ${user.raw}`, { status: 'ok', hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
             return { value: true, cycle, via: `the public wildcard ${tu.raw}`, proof: { kind: 'wildcard', tuple: t, relation, object: object.raw, user: user.raw } };
           }
           if (tu.relation) {
@@ -924,7 +927,7 @@
             const child = checkRec(ctx, user, tu.relation, objectOfUser(tu), frame, path, depth + 1);
             if (child.cycle || child.cycleSeen) cycle = true;
             if (child.result) {
-              T.emit('match', frame, `${user.raw} ∈ ${tu.raw} → ${arrowTuple(t)} applies`, { status: 'ok', hl: { dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+              T.emit('match', frame, `${user.raw} ∈ ${tu.raw} → ${arrowTuple(t)} applies`, { status: 'ok', hl: { modelEdges: { [edgeGid(relNode(tu.type, tu.relation), modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
               return { value: true, cycle, via: `the userset ${tu.raw}`, proof: { kind: 'userset', tuple: t, relation, object: object.raw, child: child.proof } };
             }
             continue;
@@ -935,8 +938,11 @@
       }
       case 'computed': {
         const from = relNode(object.type, node.relation);
-        T.emit('rewrite', frame, `${relation} includes the computed userset "${node.relation}" → anyone who is ${node.relation} of ${object.raw} is also ${relation}`, { hl: { modelNodes: { [modelNode]: 'active', [from]: 'active' }, modelEdges: { [edgeGid(from, modelNode, 'computed')]: 'active' } } });
+        T.emit('rewrite', frame, `${relation} includes the computed userset "${node.relation}" → anyone who is ${node.relation} of ${object.raw} is also ${relation}`, { hl: { modelNodes: { [modelNode]: 'active', [from]: 'active' }, modelEdges: { [edgeGid(from, modelNode, 'computed')]: 'active' }, rewrites: rk(rp, 'active') } });
         const child = checkRec(ctx, user, node.relation, object, frame, path, depth + 1);
+        // the sub-check's exit event is what the user sees; stamp its outcome on this branch's edge too
+        const last = T.events[T.events.length - 1];
+        if (last && last.hl) { last.hl.modelEdges = Object.assign({}, last.hl.modelEdges, { [edgeGid(from, modelNode, 'computed')]: child.result ? 'ok' : 'fail' }); last.hl.rewrites = Object.assign({}, last.hl.rewrites, rk(rp, child.result ? 'ok' : 'fail')); }
         return { value: !!child.result, cycle: child.cycle || child.cycleSeen, via: child.result ? `computed userset ${node.relation}` : `not ${node.relation} either`, proof: child.result ? { kind: 'computed', relation, implied: node.relation, object: object.raw, child: child.proof } : null };
       }
       case 'ttu': {
@@ -946,7 +952,7 @@
         for (const pt of uniq((objType(ctx, object.type).relMap.get(node.tupleset)?.directTypes || []).map((e) => e.type))) {
           ttuEdges[edgeGid(relNode(pt, node.computed), modelNode, 'ttu', node.tupleset)] = 'active';
         }
-        T.emit('read', frame, `"${node.computed} from ${node.tupleset}" → read ${object.raw}'s ${node.tupleset} tuples: ${tuples.length ? tuples.map((t) => t.user.raw).join(', ') : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, modelEdges: ttuEdges, dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
+        T.emit('read', frame, `"${node.computed} from ${node.tupleset}" → read ${object.raw}'s ${node.tupleset} tuples: ${tuples.length ? tuples.map((t) => t.user.raw).join(', ') : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, modelEdges: ttuEdges, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
         let cycle = false;
         for (const t of tuples) {
           if (t.user.relation || t.user.wildcard) { T.emit('skip', frame, `${arrowTuple(t)} — tupleset tuples must point at a plain object, skipped`, { status: 'skip', minor: true }); continue; }
@@ -956,7 +962,7 @@
           const child = checkRec(ctx, user, node.computed, parentObj, frame, path, depth + 1);
           if (child.cycle || child.cycleSeen) cycle = true;
           if (child.result) {
-            T.emit('match', frame, `${user.raw} is ${node.computed} of ${parentObj.raw} → inherited through ${node.tupleset}`, { status: 'ok', hl: { dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [parentObj.raw]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+            T.emit('match', frame, `${user.raw} is ${node.computed} of ${parentObj.raw} → inherited through ${node.tupleset}`, { status: 'ok', hl: { modelEdges: { [edgeGid(relNode(parentObj.type, node.computed), modelNode, 'ttu', node.tupleset)]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [parentObj.raw]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
             return { value: true, cycle, via: `${node.computed} from ${node.tupleset} (${parentObj.raw})`, proof: { kind: 'ttu', tuple: t, relation, tupleset: node.tupleset, computed: node.computed, object: object.raw, child: child.proof } };
           }
         }
@@ -964,14 +970,14 @@
       }
       case 'union': {
         const n = node.children.length;
-        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → union: satisfied if ANY branch is`, { hl: { modelNodes: { [modelNode]: 'active' } } });
+        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → union: satisfied if ANY branch is`, { hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active') } });
         let cycle = false;
         for (let i = 0; i < n; i++) {
-          T.emit('branch', frame, `Branch ${i + 1} of ${n}: ${describeRewrite(node.children[i])}`, { status: 'info' });
-          const r = evalRewrite(ctx, frame, node.children[i], user, relation, object, path, depth);
+          T.emit('branch', frame, `Branch ${i + 1} of ${n}: ${describeRewrite(node.children[i])}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([i]), 'active') } });
+          const r = evalRewrite(ctx, frame, node.children[i], user, relation, object, path, depth, rp.concat([i]));
           cycle = cycle || !!r.cycle;
           if (r.value) {
-            if (i < n - 1) T.emit('note', frame, `Branch ${i + 1} is satisfied → the remaining ${n - 1 - i} branch${n - 1 - i > 1 ? 'es are' : ' is'} skipped (short-circuit)`, { status: 'ok' });
+            if (i < n - 1) T.emit('note', frame, `Branch ${i + 1} is satisfied → the remaining ${n - 1 - i} branch${n - 1 - i > 1 ? 'es are' : ' is'} skipped (short-circuit)`, { status: 'ok', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([i]), 'ok') } });
             return { value: true, cycle, via: r.via, proof: r.proof };
           }
         }
@@ -979,15 +985,15 @@
       }
       case 'intersection': {
         const n = node.children.length;
-        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → intersection: ALL branches must be satisfied`, { hl: { modelNodes: { [modelNode]: 'active' } } });
+        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → intersection: ALL branches must be satisfied`, { hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active') } });
         let cycle = false;
         const vias = [], parts = [];
         for (let i = 0; i < n; i++) {
-          T.emit('branch', frame, `Branch ${i + 1} of ${n}: ${describeRewrite(node.children[i])}`, { status: 'info' });
-          const r = evalRewrite(ctx, frame, node.children[i], user, relation, object, path, depth);
+          T.emit('branch', frame, `Branch ${i + 1} of ${n}: ${describeRewrite(node.children[i])}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([i]), 'active') } });
+          const r = evalRewrite(ctx, frame, node.children[i], user, relation, object, path, depth, rp.concat([i]));
           cycle = cycle || !!r.cycle;
           if (!r.value) {
-            if (i < n - 1) T.emit('note', frame, `Branch ${i + 1} failed → the intersection cannot be satisfied; remaining branches skipped`, { status: 'fail' });
+            if (i < n - 1) T.emit('note', frame, `Branch ${i + 1} failed → the intersection cannot be satisfied; remaining branches skipped`, { status: 'fail', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([i]), 'fail') } });
             return { value: false, cycle, via: `"${describeRewrite(node.children[i])}" is not satisfied (intersection)` };
           }
           vias.push(r.via); parts.push(r.proof);
@@ -995,15 +1001,15 @@
         return { value: true, cycle, via: `all of: ${vias.join('; ')}`, proof: { kind: 'all', parts, relation, object: object.raw } };
       }
       case 'difference': {
-        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → exclusion: the base must hold AND the excluded part must not`, { hl: { modelNodes: { [modelNode]: 'active' } } });
-        T.emit('branch', frame, `Base: ${describeRewrite(node.base)}`, { status: 'info' });
-        const b = evalRewrite(ctx, frame, node.base, user, relation, object, path, depth);
+        T.emit('rewrite', frame, `${relation} = ${describeRewrite(node)} → exclusion: the base must hold AND the excluded part must not`, { hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active') } });
+        T.emit('branch', frame, `Base: ${describeRewrite(node.base)}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([0]), 'active') } });
+        const b = evalRewrite(ctx, frame, node.base, user, relation, object, path, depth, rp.concat([0]));
         if (!b.value) return { value: false, cycle: b.cycle, via: `the base "${describeRewrite(node.base)}" is not satisfied` };
-        T.emit('branch', frame, `Base holds → now the exclusion: but not ${describeRewrite(node.subtract)}`, { status: 'info' });
-        const s = evalRewrite(ctx, frame, node.subtract, user, relation, object, path, depth);
+        T.emit('branch', frame, `Base holds → now the exclusion: but not ${describeRewrite(node.subtract)}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: Object.assign(rk(rp.concat([0]), 'ok'), rk(rp.concat([1]), 'active')) } });
+        const s = evalRewrite(ctx, frame, node.subtract, user, relation, object, path, depth, rp.concat([1]));
         const cycle = b.cycle || s.cycle;
         if (s.value) {
-          T.emit('note', frame, `Excluded by "but not ${describeRewrite(node.subtract)}"`, { status: 'fail' });
+          T.emit('note', frame, `Excluded by "but not ${describeRewrite(node.subtract)}"`, { status: 'fail', hl: { modelNodes: { [modelNode]: 'fail' }, rewrites: rk(rp.concat([1]), 'fail') } });
           return { value: false, cycle, via: `excluded by "but not ${describeRewrite(node.subtract)}"` };
         }
         return { value: true, cycle, via: `${b.via}, and not excluded`, proof: b.proof ? Object.assign({}, b.proof, { notExcluded: describeRewrite(node.subtract) }) : null };
@@ -1384,13 +1390,14 @@
 
   // Aggregate highlight for the finished query (every tuple read / matched, every resolved frame).
   function summaryHighlight(trace) {
-    const hl = { modelNodes: {}, modelEdges: {}, dataNodes: {}, dataEdges: {}, tupleIds: [] };
+    const hl = { modelNodes: {}, modelEdges: {}, dataNodes: {}, dataEdges: {}, rewrites: {}, tupleIds: [] };
     const rank = { skip: 0, read: 1, active: 1, fail: 2, ok: 3 };
     const put = (map, k, v) => { if (!map[k] || rank[v] > rank[map[k]]) map[k] = v; };
     for (const ev of trace.events) {
       const h = ev.hl || {};
       for (const [k, v] of Object.entries(h.dataEdges || {})) put(hl.dataEdges, k, v === 'active' ? 'read' : v);
       for (const [k, v] of Object.entries(h.modelEdges || {})) put(hl.modelEdges, k, v === 'active' ? 'read' : v);
+      for (const [k, v] of Object.entries(h.rewrites || {})) put(hl.rewrites, k, v === 'active' ? 'read' : v);
       if (h.tupleIds) hl.tupleIds.push(...h.tupleIds);
     }
     for (const f of trace.frames) {

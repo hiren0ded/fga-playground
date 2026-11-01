@@ -258,6 +258,7 @@ user:* viewer document:readme
     Graph.setPins(st.pins); Graph.setCollapsed(st.collapsed);
     Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel });
     renderCompareSelect(st);
+    renderResSelect();
     renderTimeTravelBanner(st);
     refreshDatalists();
     updateModelBadge();
@@ -285,6 +286,16 @@ user:* viewer document:readme
     $('#legend-diff').hidden = !cur;
   }
   $('#compare-select').addEventListener('change', () => { S.ui.compareId = $('#compare-select').value || null; persist(); recompute(); });
+  // resolution view: which relation's tree is shown (empty = follow the query)
+  function renderResSelect() {
+    const sel = $('#res-select');
+    const m = S.effectiveModel;
+    const cur = Graph.resolutionRoot || '';
+    const groups = m ? m.types.filter((t) => t.relations.length).map((t) => `<optgroup label="${esc(t.name)}">${t.relations.map((r) => { const k = `${t.name}#${r.name}`; return `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(k)}</option>`; }).join('')}</optgroup>`).join('') : '';
+    sel.innerHTML = `<option value=""${cur ? '' : ' selected'}>follow the query${!cur && Graph.resolutionKey ? ` · ${esc(Graph.resolutionKey)}` : ''}</option>` + groups;
+    $('#res-wrap').hidden = Graph.mode !== 'model' || !m;
+  }
+  $('#res-select').addEventListener('change', () => { Graph.setResolutionRoot($('#res-select').value || null); });
   // time travel over the change log
   function tuplesTextAt(st, upto) {
     const keys = new Map();
@@ -443,6 +454,9 @@ user:* viewer document:readme
       const ctx = parseContext();
       if (!ctx.ok) { resultEl.innerHTML = `<div class="answer warn"><div class="ans-head"><span class="ans-verdict">Context</span><span class="ans-text">${esc(ctx.error)}</span></div></div>`; return; }
       const store = S.store;
+      // the resolution view follows the relation being queried
+      const qType = q.type === 'listObjects' ? q.objectType : (q.object || '').split(':')[0];
+      Graph.setQueryRelation(qType && q.relation ? `${qType}#${q.relation}` : null);
       const t0 = performance.now();
       let res, missing = [];
       const need = (ids) => ids.filter((id) => !q[id]).map((id) => DEF[q.type].find((f) => f.id === id).label);
@@ -459,10 +473,10 @@ user:* viewer document:readme
       }
       const ms = performance.now() - t0;
       S.result = { type: q.type, q: Object.assign({}, q, { contextObj: ctx.value }), res, ms };
+      S.summaryHl = res.trace && res.trace.events.length ? FGA.summaryHighlight(res.trace) : null;
       if (q.type === 'check' && res.root) { S.result.chains = FGA.proofChains(res.root.proof); S.result.proofHl = proofHighlight(S.result.chains); }
       renderResult();
       if (res.trace && res.trace.events.length) {
-        S.summaryHl = FGA.summaryHighlight(res.trace);
         buildTraceTree(res.trace);
         explainEl.hidden = false;
         $('#stepper').hidden = false;
@@ -480,7 +494,7 @@ user:* viewer document:readme
       const hl = { modelNodes: {}, modelEdges: {}, dataNodes: {}, dataEdges: {}, tupleIds: [] };
       chains.forEach((c) => c.segments.forEach((sg) => { hl.dataEdges[`t${sg.tupleId}`] = 'ok'; hl.dataNodes[sg.from] = 'ok'; hl.dataNodes[sg.to] = 'ok'; hl.tupleIds.push(sg.tupleId); }));
       if (S.summaryHl) {
-        hl.modelNodes = S.summaryHl.modelNodes; hl.modelEdges = S.summaryHl.modelEdges;
+        hl.modelNodes = S.summaryHl.modelNodes; hl.modelEdges = S.summaryHl.modelEdges; hl.rewrites = S.summaryHl.rewrites;
         // branches the resolver tried and rejected stay visible as ghosts
         Object.entries(S.summaryHl.dataEdges || {}).forEach(([k, v]) => { if (!hl.dataEdges[k]) hl.dataEdges[k] = 'ghost'; });
         Object.entries(S.summaryHl.dataNodes || {}).forEach(([k, v]) => { if (!hl.dataNodes[k]) hl.dataNodes[k] = v === 'fail' ? 'ghost' : 'read'; });
@@ -623,7 +637,7 @@ user:* viewer document:readme
       if (cur) { let p = cur.parentElement; while (p && p !== traceEl) { if (p.classList.contains('frame')) p.classList.remove('collapsed'); p = p.parentElement; } if (scroll !== false) cur.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
       if (last) Graph.highlight(r.type === 'check' && r.res.allowed && r.proofHl && !S.ui.allSteps ? r.proofHl : S.summaryHl, { stepping: false });
       else {
-        const hl = { modelNodes: Object.assign({}, e.hl.modelNodes || {}), modelEdges: Object.assign({}, e.hl.modelEdges || {}), dataNodes: Object.assign({}, e.hl.dataNodes || {}), dataEdges: Object.assign({}, e.hl.dataEdges || {}) };
+        const hl = { modelNodes: Object.assign({}, e.hl.modelNodes || {}), modelEdges: Object.assign({}, e.hl.modelEdges || {}), dataNodes: Object.assign({}, e.hl.dataNodes || {}), dataEdges: Object.assign({}, e.hl.dataEdges || {}), rewrites: e.hl.rewrites || null };
         if (e.frame.modelNode && !hl.modelNodes[e.frame.modelNode]) hl.modelNodes[e.frame.modelNode] = 'active';
         if (e.frame.object && !e.frame.object.endsWith(':?') && !hl.dataNodes[e.frame.object]) hl.dataNodes[e.frame.object] = 'active';
         let p = e.frame.parent; while (p) { if (p.modelNode && !hl.modelNodes[p.modelNode]) hl.modelNodes[p.modelNode] = 'read'; if (p.object && !p.object.endsWith(':?') && !hl.dataNodes[p.object]) hl.dataNodes[p.object] = 'read'; p = p.parent; }
@@ -938,17 +952,20 @@ user:* viewer document:readme
     persist();
   }
   $$('#pane-editor .pane-tabs button').forEach((b) => b.addEventListener('click', () => setEditorTab(b.dataset.tab)));
-  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolver: every relation is a node and each edge is a way into it', data: 'data: every tuple as an edge from user to object' };
+  const GRAPH_HINTS = { schema: 'schema: one card per type, derived relations read inline, only cross-type links are edges', model: 'resolution: how one relation is computed, as the tree Check walks — the trace lights up its branches', data: 'data: every tuple as an edge from user to object' };
   function syncGraphToolbar() {
     const m = Graph.mode;
     $$('#graph-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
     $('#graph-hint').textContent = GRAPH_HINTS[m] || '';
     $('#btn-connect').hidden = m !== 'data';
     const st = activeStore(); if (st) $('#compare-wrap').hidden = m !== 'schema' || !st.models.length;
+    $('#res-wrap').hidden = m !== 'model' || !S.effectiveModel;
+    if (m === 'model') renderResSelect();
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
   }
   function setGraphMode(m) { if (!GRAPH_HINTS[m]) m = 'schema'; S.ui.graphMode = m; Graph.setMode(m); syncGraphToolbar(); persist(); }
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
+  Graph.on('rootChanged', () => renderResSelect());
   $('#btn-connect').addEventListener('click', () => { const on = !Graph.connectMode; Graph.setConnectMode(on); $('#btn-connect').setAttribute('aria-pressed', String(on)); if (on) toast('Connect mode: drag from a user to an object to write a tuple'); });
   // layout & export menu
   const gmenu = $('#gmenu');
@@ -1055,10 +1072,11 @@ user:* viewer document:readme
     }
     if (kind === 'node' && mode === 'model') {
       const rel = datum.kind === 'rel' && S.effectiveModel.typeMap.get(datum.type) && S.effectiveModel.typeMap.get(datum.type).relMap.get(datum.rel);
-      CtxMenu.open(ev, esc(datum.id), datum.kind === 'rel' ? 'relation' : 'type', [
+      CtxMenu.open(ev, esc(datum.id || datum.type), datum.kind === 'rel' ? 'relation' : 'type', [
         { k: 'queries', label: 'open the query menu', run: () => NodeMenu.open(datum, 'model', ev) },
         ...(rel ? [{ k: 'go to', label: `line ${rel.line} in the model`, run: () => { dslEditor.scrollToLine(rel.line); setEditorTab('dsl'); } }] : []),
-        { k: 'collapse', label: `collapse type ${datum.type}`, run: () => { const st = activeStore(); const set = new Set(st.collapsed || []); if (set.has(datum.type)) set.delete(datum.type); else set.add(datum.type); st.collapsed = Array.from(set); Graph.setCollapsed(st.collapsed); Graph.setMode(Graph.mode); persist(); } },
+        ...(rel && Graph.resolutionKey !== datum.id ? [{ k: 'resolve', label: `make ${datum.id} the root of this view`, run: () => Graph.setResolutionRoot(datum.id) }] : []),
+        ...(Graph.resolutionRoot ? [{ k: 'follow', label: 'follow the query again', run: () => Graph.setResolutionRoot(null) }] : []),
       ]);
       return;
     }
@@ -1067,7 +1085,7 @@ user:* viewer document:readme
       CtxMenu.open(ev, esc(datum.id), 'relation', [
         { k: 'queries', label: 'open the query menu', run: () => NodeMenu.open(datum, 'model', ev) },
         ...(rel ? [{ k: 'go to', label: `line ${rel.line} in the model`, run: () => { dslEditor.scrollToLine(rel.line); setEditorTab('dsl'); } }] : []),
-        ...(rel ? [{ k: 'resolver', label: `show ${datum.id} in the resolver view`, run: () => { setGraphMode('model'); setTimeout(() => { Graph.focusNode(datum.id); Graph.panTo(datum.id); }, 50); } }] : []),
+        ...(rel ? [{ k: 'resolve', label: `show how ${datum.id} resolves`, run: () => { Graph.setResolutionRoot(datum.id); setGraphMode('model'); } }] : []),
       ]);
       return;
     }

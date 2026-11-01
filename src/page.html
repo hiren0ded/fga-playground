@@ -119,12 +119,13 @@
       <div class="graph-toolbar">
         <div class="seg" id="graph-mode">
           <button data-mode="schema" aria-pressed="true">Schema</button>
-          <button data-mode="model" aria-pressed="false">Resolver</button>
+          <button data-mode="model" aria-pressed="false" title="How one relation is computed, as the tree Check walks">Resolution</button>
           <button data-mode="data" aria-pressed="false">Data</button>
         </div>
-        <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" title="Draw an edge from each subject type (e.g. user) to every relation it can be assigned to, instead of a badge" hidden>subjects</button>
+        <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" hidden>subjects</button>
         <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>
         <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
+        <label class="compare" id="res-wrap" hidden><span>relation</span><select class="ctl wide" id="res-select" title="Which relation's resolution to draw"><option value="">follow the query</option></select></label>
         <span class="hint" id="graph-hint"></span>
         <div class="find" id="find-wrap">
           <input class="ctl" id="graph-find" placeholder="Find…  ⌘K" aria-label="Find a node, relation or type" autocomplete="off" spellcheck="false">
@@ -176,7 +177,7 @@
           <span><i></i>can be assigned (relations listed)</span><span><i class="ttu"></i>inherited via a tupleset</span><span><b>∨ ∧ ¬</b> or · and · but not</span><span id="legend-diff" hidden><b class="dadd">+ added</b> <b class="dchg">~ changed</b> <b class="drem">− removed</b></span>
         </div>
         <div class="legend" id="legend-model" hidden>
-          <span><i></i>direct</span><span><i class="computed"></i>computed</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>∧</b> and</span><span><i class="ex"></i><b>¬</b> but not</span>
+          <span><b>∨</b> any of · <b>∧</b> all of · <b>∖</b> but not</span><span><i></i>direct subjects</span><span><i class="computed"></i>computed (implied)</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>↻</b> recursive</span><span><b>+</b> expand a branch</span>
         </div>
         <div class="legend" id="legend-data" hidden>
           <span class="rel-chips" id="rel-chips" hidden></span><span><b>#rel</b> userset</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span>
