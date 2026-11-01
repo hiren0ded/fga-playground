@@ -97,7 +97,7 @@ user:* viewer document:readme
     { sel: '#q-live', name: 'live', does: 'Re-runs the query automatically after every edit.', no: 'Read-only, like Run.' },
     { sel: '#q-adv-toggle', name: 'context', does: 'Request context for conditions, and contextual tuples used only for this query.', no: 'Contextual tuples are never saved into the store.' },
     { sel: '#btn-connect', name: 'connect', does: 'Drag from one node to another to add a tuple to this store (in this browser).', no: 'No server is called.' },
-    { sel: '#btn-derived', name: 'derived', does: 'Draws access that no tuple states directly, with the proof on hover.', no: 'Display only — writes nothing.' },
+    { sel: '#edges-wrap', name: 'Edges', does: '“Tuples”: one edge per stored tuple. “Tuples + derived”: also draws access no tuple states directly (dashed, hollow arrow), with the proof on hover. “Derived only”: hides the tuples and shows just the computed access — who ends up with which relation through teams, parents and rewrites.', no: 'Display only — writes nothing.' },
     { sel: '#btn-reset-view', name: '⟲ Reset', does: 'Back to the graph as first drawn: clears the proof walk, focus and highlights, closes cards you opened and puts nodes you dragged back in place (Undo in the message brings them back).', no: 'Display only — your model and tuples are untouched. To clear highlights but keep your arrangement, use ⋯ → Clear highlights or press Esc.' },
     { sel: '#cards-wrap', name: 'Cards', does: 'Chooses which objects are drawn as cards — a box with one row (slot) per relation, so a tuple points at the exact relation it grants, e.g. task:t1 → assignee. “Objects the query walks”: only the objects your last Check / List query passed through open as cards; everything else stays a small node (run a query in the Query lab to see it). “Every object”: all objects are cards — complete, but busier. “None”: every object is a small node, tuples point at the object.', no: 'Changes the drawing only, not the data. Click a node’s ⊕ to open or close a single card.' },
     { sel: '#store-delete', name: 'Delete store', does: 'Removes this store (all versions, tuples, assertions) from this browser, after you confirm.', no: 'Cannot be undone here. Does not delete copies others opened from your share links.' },
@@ -328,7 +328,7 @@ user:* viewer document:readme
     const relations = S.effectiveModel ? Array.from(new Set(S.effectiveModel.types.flatMap((t) => t.relations.map((r) => r.name)))) : [];
     const baseModel = compareBase(st);
     Graph.setPins(st.pins); Graph.setCollapsed(st.collapsed);
-    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel, store: S.store, derived: S.ui.derived ? computeDerived() : null });
+    Graph.setData({ schema: S.effectiveModel ? buildSchemaGraph(S.effectiveModel, baseModel) : null, model: S.effectiveModel ? FGA.buildModelGraph(S.effectiveModel) : null, data: FGA.buildDataGraph(S.store), types, relations, modelObj: S.effectiveModel, store: S.store, derived: S.ui.derived ? computeDerived() : null, derivedOnly: !!S.ui.derivedOnly });
     renderCompareSelect(st);
     renderResSelect();
     renderTimeTravelBanner(st);
@@ -1610,8 +1610,8 @@ user:* viewer document:readme
     if (m === 'model') renderResSelect();
     $('#cards-wrap').hidden = m !== 'data';
     $('#cards-select').value = Graph.cardsMode;
-    $('#btn-derived').hidden = m !== 'data';
-    $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
+    $('#edges-wrap').hidden = m !== 'data';
+    $('#edges-select').value = S.ui.derived ? (S.ui.derivedOnly ? 'derived' : 'both') : 'tuples';
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = m === 'matrix' || ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
     $('#find-wrap').hidden = m === 'matrix';
     const hb = $('#health-bar'); if (hb) hb.hidden = m !== 'schema';
@@ -1620,12 +1620,12 @@ user:* viewer document:readme
   Graph.on('modeChanged', (m) => { S.ui.graphMode = m; syncGraphToolbar(); persist(); });
   Graph.on('rootChanged', () => renderResSelect());
   $('#cards-select').addEventListener('change', () => { S.ui.cards = $('#cards-select').value; Graph.setCardsMode(S.ui.cards); persist(); });
-  $('#btn-derived').addEventListener('click', () => {
-    S.ui.derived = !S.ui.derived;
-    $('#btn-derived').setAttribute('aria-pressed', String(!!S.ui.derived));
+  $('#edges-select').addEventListener('change', () => {
+    const v = $('#edges-select').value;
+    S.ui.derived = v !== 'tuples'; S.ui.derivedOnly = v === 'derived';
     const list = S.ui.derived ? computeDerived() : null;
-    Graph.setDerived(list);
-    if (S.ui.derived) toast(list.length ? `${list.length} derived grant${list.length === 1 ? '' : 's'}: dashed edges, hover for the proof` : 'No derived access: every grant in this store is a direct tuple');
+    Graph.setDerived(list, S.ui.derivedOnly);
+    if (S.ui.derived) toast(list.length ? `${list.length} derived grant${list.length === 1 ? '' : 's'}${S.ui.derivedOnly ? ' (tuples hidden)' : ''}: dashed edges, hover for the proof` : 'No derived access: every grant in this store is a direct tuple');
     persist();
   });
   Graph.on('runCheck', ({ user, relation, object }) => { Query.load(Object.assign({}, Query.q, { type: 'check', user, relation, object })); Query.run({}); if (mq.matches) { S.ui.mobileView = 'query'; applyMobile(); } });

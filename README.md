@@ -29,7 +29,7 @@ wildcard/exclusion set algebra for ListUsers).
   - *Data* – tuples as edges. Objects the query walked open as **cards with one slot per
     relation** (`doc:roadmap#viewer` is a real node), tuples point at the slot they grant,
     computed relations are arcs between rows, "viewer from parent" is a derived edge between
-    cards, and a **derived** toggle materialises every grant no tuple states, with the proof on
+    cards, and the **edges** menu adds every grant no tuple states (or shows only those), with the proof on
     hover. Cards can be opened for every object or none.
   - *Matrix* – subjects × objects for one relation: direct tuple, derived, public wildcard or
     excluded, with a diff against any written model version (gained / lost). Click a cell to

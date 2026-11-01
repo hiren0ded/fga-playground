@@ -132,7 +132,7 @@
         <button class="btn sm toggle" id="btn-connect" aria-pressed="false" hidden>⟋ connect</button>
         <label class="compare" id="compare-wrap" hidden><span>vs</span><select class="ctl" id="compare-select" title="Overlay the differences between a written model version and the draft"><option value="">no diff</option></select></label>
         <label class="compare" id="res-wrap" hidden><span>relation</span><select class="ctl wide" id="res-select" title="Which relation's resolution to draw"><option value="">follow the query</option></select></label>
-        <button class="btn sm toggle" id="btn-derived" aria-pressed="false" title="Materialise derived access: every subject who holds a relation without a tuple saying so, as dashed edges with the proof on hover" hidden>derived</button>
+        <label class="compare" id="edges-wrap" hidden><span>edges</span><select class="ctl" id="edges-select" title="Which edges to draw: the tuples as written, plus derived access (who holds a relation without a tuple saying so), or derived access only"><option value="tuples">tuples</option><option value="both">tuples + derived</option><option value="derived">derived only</option></select></label>
         <label class="compare" id="cards-wrap" hidden><span>cards</span><select class="ctl" id="cards-select" title="Which objects are drawn as cards (one row per relation): only those your last query walked, all of them, or none"><option value="path">objects the query walks</option><option value="all">every object</option><option value="none">none (small nodes)</option></select></label>
         <span class="hint" id="graph-hint"></span>
         <div class="find" id="find-wrap">

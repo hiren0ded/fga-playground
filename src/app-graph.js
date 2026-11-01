@@ -183,6 +183,7 @@
     let treeRoot = null, treeQueryKey = null, treeExpanded = new Map();
     // instance graph (data view): which objects open as cards with one slot per relation
     let cardsMode = 'path', pathObjects = new Set(), cardOverride = new Map(), storeRef = null, modelEdgesCache = null;
+    let derivedOnly = false;
     let derivedAccess = null; // [{ user, relation, object, wildcard }] materialised access that no tuple states directly
     // proof walk: a numbered path (FGA.proofSteps) drawn over the data graph. `proofWalk` is pinned by a
     // click / a Check result; `proofPreview` follows the pointer over a derived edge.
@@ -214,7 +215,8 @@
     const emit = (k, ...a) => { if (handlers[k]) return handlers[k](...a); return undefined; };
 
     // ── public setters
-    function setData({ schema, model, data, types, relations, modelObj, store, derived }) {
+    function setData({ schema, model, data, types, relations, modelObj, store, derived, derivedOnly: only }) {
+      if (only !== undefined) derivedOnly = !!only;
       graphs = { schema, model, data };
       modelRef = modelObj || null;
       storeRef = store || null;
@@ -238,7 +240,8 @@
       if (!same && mode === 'data' && cardsMode === 'path') render(true);
     }
     function toggleCard(id, on) { cardOverride.set(id, !!on); render(true); }
-    function setDerived(list) { derivedAccess = list || null; if (mode === 'data') render(true); }
+    // only: draw just the derived grants (who has access that no tuple states), not the tuples themselves
+    function setDerived(list, only) { derivedAccess = list || null; derivedOnly = !!(list && only); freshNext = true; if (mode === 'data') render(true); }
     // resolution view: which relation is drawn. null = follow the current query.
     function resolutionKey() {
       if (!modelRef) return null;
@@ -445,10 +448,21 @@
           if (!fromN || !toN) continue;
           const toSlot = toN.kind === 'inst' && toN.rowMap.has(d.relation) ? `${d.object}#${d.relation}` : null;
           const id = `drv:${d.user}→${d.object}#${d.relation}`;
-          if (seen.has(`${d.user}|${toSlot || d.object}`) && !toSlot) continue; // a plain node already has a tuple edge from this subject
-          edges.push({ id, kind: 'derived', access: true, from: d.user, to: d.object, fromSlot: null, toSlot, tupleIds: [], rel: d.relation, rels: [d.relation], labels: [], usersets: [], conditions: [], contextual: false, wildcard: !!d.wildcard, label: toSlot ? '' : d.relation, user: d.user, relation: d.relation, object: d.object });
+          if (seen.has(`${d.user}|${toSlot || d.object}`) && !toSlot && !derivedOnly) continue; // a plain node already has a tuple edge from this subject
+          // into a plain node, one edge per subject → object pair carries every derived relation
+          const same = !toSlot && edges.find((x) => x.kind === 'derived' && x.access && !x.toSlot && x.from === d.user && x.to === d.object);
+          if (same) { same.allRels.push(d.relation); same.label = `${same.allRels[0]} +${same.allRels.length - 1}`; continue; }
+          edges.push({ id, kind: 'derived', access: true, from: d.user, to: d.object, fromSlot: null, toSlot, tupleIds: [], rel: d.relation, rels: [d.relation], labels: [], usersets: [], conditions: [], contextual: false, wildcard: !!d.wildcard, label: toSlot ? '' : d.relation, user: d.user, relation: d.relation, object: d.object, allRels: [d.relation] });
           if (toSlot) toN.rowMap.get(d.relation).derived++;
         }
+      }
+      if (derivedAccess && derivedOnly && !pf) {
+        // keep the derived grants and only the nodes they connect; rows light up for derived access only
+        const kept = edges.filter((e) => e.kind === 'derived');
+        const ends = new Set(); kept.forEach((e) => { ends.add(e.from); ends.add(e.to); });
+        edges.length = 0; kept.forEach((e) => edges.push(e));
+        for (let i = nodes.length - 1; i >= 0; i--) if (!ends.has(nodes[i].id)) nodes.splice(i, 1);
+        nodes.forEach((n) => { if (n.rows) n.rows.forEach((r) => { r.direct = 0; }); });
       }
       const pairs = new Set(edges.map((e) => `${e.from}|${e.to}`));
       edges.forEach((e) => { e.reverse = pairs.has(`${e.to}|${e.from}`); });
@@ -1291,7 +1305,8 @@
     function tipForEdge(e) {
       if (mode === 'data' && e.access) {
         const steps = stepsFor(e);
-        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code><div class="sub">derived — no tuple says this. Check follows these steps (numbered on the graph):</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to pin the walk · double-click to run this Check</div>`;
+        const more = e.allRels && e.allRels.length > 1 ? `<div class="sub">${esc(e.user)} also holds, without a tuple: <b>${esc(e.allRels.slice(1).join(', '))}</b> (open ${esc(e.object)} as a card for one edge per relation)</div>` : '';
+        return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code>${more}<div class="sub">derived — no tuple says this. Check follows these steps (numbered on the graph):</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to pin the walk · double-click to run this Check</div>`;
       }
       if (mode === 'data' && e.derived) {
         const t = storeRef && storeRef.byId(e.tupleId);
