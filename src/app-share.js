@@ -70,6 +70,7 @@
       const view = ex ? (ex.view === 'matrix' ? 'matrix' : 'data') : p.view;
       if (['schema', 'model', 'data', 'matrix'].includes(view)) setGraphMode(view);
       switchStore(st.id);
+      if (ex && view !== 'matrix') Query.run({}); // the link asked for this explanation: walk it on the graph
       if (ex && view === 'matrix') { S.ui.mxWalk = Object.assign(S.ui.mxWalk || {}, { view: ex.mx === 'tree' ? 'tree' : 'matrix' }); S.ui.matrix = { type: ex.object.split(':')[0], relation: ex.relation }; Matrix.openWalk(ex.user, ex.relation, ex.object); }
       toast(`Opened “${st.name}” as your own copy — your edits stay in this browser and never change the sender’s store`);
       return true;

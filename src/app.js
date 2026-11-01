@@ -338,7 +338,7 @@ user:* viewer document:readme
     Query.onModelChanged();
     Assertions.runAll();
     Inspector.refresh();
-    if (S.ui.live && S.result) Query.run({ auto: true }); else if (S.result && !S.ui.live) { /* keep stale result */ }
+    if (S.ui.live && S.result) Query.run({ auto: true, quiet: !!S.result.quiet }); else if (S.result && !S.ui.live) { /* keep stale result */ }
     if (!S.timeTravel) changesSoon();
     persist();
   }
@@ -615,7 +615,9 @@ user:* viewer document:readme
     }
     const explainEl = $('#explain');
     function clearExplain() { $('#stepper').hidden = true; $('#trace').innerHTML = ''; explainEl.hidden = true; $('#explain-hint').textContent = ''; }
-    function run({ auto } = {}) {
+    // quiet: a run nobody asked for (page load, store switch, an edit elsewhere) fills the Query lab but
+    // doesn't take over the graph with a proof walk, unless a walk is already showing
+    function run({ auto, quiet } = {}) {
       stopPlay();
       const model = S.effectiveModel;
       const resultEl = $('#result');
@@ -641,7 +643,7 @@ user:* viewer document:readme
         return;
       }
       const ms = performance.now() - t0;
-      S.result = { type: q.type, q: Object.assign({}, q, { contextObj: ctx.value }), res, ms };
+      S.result = { type: q.type, q: Object.assign({}, q, { contextObj: ctx.value }), res, ms, quiet: !!quiet && !Graph.proofActive };
       if (q.type === 'check' && res.root && !res.allowed && !res.error) { try { S.result.denial = FGA.explainDenial(model, store, { user: q.user, relation: q.relation, object: q.object, context: ctx.value }, res, Graph.proofOrder); } catch (e) { S.result.denial = null; } }
       S.summaryHl = res.trace && res.trace.events.length ? FGA.summaryHighlight(res.trace) : null;
       if (q.type === 'check' && res.root) { S.result.chains = FGA.proofChains(res.root.proof); S.result.proofHl = proofHighlight(S.result.chains); }
@@ -836,11 +838,14 @@ user:* viewer document:readme
       const cur = traceEl.querySelector('.ev.current');
       if (cur) { let p = cur.parentElement; while (p && p !== traceEl) { if (p.classList.contains('frame')) p.classList.remove('collapsed'); p = p.parentElement; } if (scroll !== false) cur.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
       if (last) {
+        if (r.quiet) { Graph.highlight(null); Graph.clearProof({ force: true }); }
+        else {
         Graph.highlight(r.type === 'check' && r.res.allowed && r.proofHl && !S.ui.allSteps ? r.proofHl : S.summaryHl, { stepping: false });
         // the proof as a numbered walk over the data graph
         if (r.type === 'check' && r.res.allowed && r.res.root && r.res.root.proof) Graph.showProof(r.res.root.proof, { pin: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || S.stepBack || null });
         else if (r.type === 'check' && r.denial) { const qq = { user: r.q.user, relation: r.q.relation, object: r.q.object, context: r.q.contextObj }; Graph.showProof({ stepsFor: (o) => (FGA.explainDenial(S.effectiveModel, S.store, qq, r.res, o) || { steps: [] }).steps }, { pin: true, denial: true, auto: !S.proofBack, lock: !!S.proofBack, title: `${r.q.user} ${r.q.relation} ${r.q.object}`, back: S.proofBack || S.stepBack || null }); }
         else Graph.clearProof({ force: true });
+        }
       } else {
         Graph.clearProof({ force: true });
         const hl = { modelNodes: Object.assign({}, e.hl.modelNodes || {}), modelEdges: Object.assign({}, e.hl.modelEdges || {}), dataNodes: Object.assign({}, e.hl.dataNodes || {}), dataEdges: Object.assign({}, e.hl.dataEdges || {}), rewrites: e.hl.rewrites || null };
@@ -1216,7 +1221,7 @@ user:* viewer document:readme
     Query.renderTryChips(st);
     $('#result').innerHTML = ''; $('#stepper').hidden = true; $('#trace').innerHTML = '';
     recompute();
-    Query.run({ auto: true });
+    Query.run({ auto: true, quiet: true });
     renderExamples();
     persist();
   }
