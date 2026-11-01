@@ -97,7 +97,7 @@ user:* viewer document:readme
     { sel: '#q-live', name: 'live', does: 'Re-runs the query automatically after every edit.', no: 'Read-only, like Run.' },
     { sel: '#q-adv-toggle', name: 'context', does: 'Request context for conditions, and contextual tuples used only for this query.', no: 'Contextual tuples are never saved into the store.' },
     { sel: '#btn-connect', name: 'connect', does: 'Drag from one node to another to add a tuple to this store (in this browser).', no: 'No server is called.' },
-    { sel: '#edges-wrap', name: 'Edges', does: '“Tuples”: one edge per stored tuple. “Tuples + derived”: also draws access no tuple states directly (dashed, hollow arrow), with the proof on hover. “Derived only”: hides the tuples and shows just the computed access — who ends up with which relation through teams, parents and rewrites.', no: 'Display only — writes nothing.' },
+    { sel: '#edges-wrap', name: 'Edges', does: 'Data view — “tuples”: one edge per stored tuple; “tuples + derived”: also access no tuple states directly (dashed, hollow arrow; click one for its proof); “derived only”: just the computed access. Schema view — “tuples”: which subject types a tuple may assign (the [type] restrictions); “derived”: the “X from Y” links between types; “both”: everything.', no: 'Display only — writes nothing.' },
     { sel: '#btn-reset-view', name: '⟲ Reset', does: 'Back to the graph as first drawn: clears the proof walk, focus and highlights, closes cards you opened and puts nodes you dragged back in place (Undo in the message brings them back).', no: 'Display only — your model and tuples are untouched. To clear highlights but keep your arrangement, use ⋯ → Clear highlights or press Esc.' },
     { sel: '#cards-wrap', name: 'Cards', does: 'Chooses which objects are drawn as cards — a box with one row (slot) per relation, so a tuple points at the exact relation it grants, e.g. task:t1 → assignee. “Objects the query walks”: only the objects your last Check / List query passed through open as cards; everything else stays a small node (run a query in the Query lab to see it). “Every object”: all objects are cards — complete, but busier. “None” (the default): every object is a small node, tuples point at the object; a proof walk still opens the cards it passes through.', no: 'Changes the drawing only, not the data. Click a node’s ⊕ to open or close a single card.' },
     { sel: '#store-delete', name: 'Delete store', does: 'Removes this store (all versions, tuples, assertions) from this browser, after you confirm.', no: 'Cannot be undone here. Does not delete copies others opened from your share links.' },
@@ -1629,8 +1629,9 @@ user:* viewer document:readme
     if (m === 'model') renderResSelect();
     $('#cards-wrap').hidden = m !== 'data';
     $('#cards-select').value = Graph.cardsMode;
-    $('#edges-wrap').hidden = m !== 'data';
-    $('#edges-select').value = S.ui.derived ? (S.ui.derivedOnly ? 'derived' : 'both') : 'tuples';
+    $('#edges-wrap').hidden = m !== 'data' && m !== 'schema';
+    $('#edges-select').value = m === 'schema' ? (S.ui.schemaEdges || 'both') : S.ui.derived ? (S.ui.derivedOnly ? 'derived' : 'both') : 'tuples';
+    $('#edges-select').title = m === 'schema' ? 'Schema edges: “tuples” = which subject types a tuple may assign to a relation (from the [type] restrictions); “derived” = “X from Y” links, where a relation is inherited through a parent object; or both' : 'Which edges to draw: the tuples as written, plus derived access (who holds a relation without a tuple saying so), or derived access only';
     $$('#layout-seg button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.l === Graph.layout)); b.disabled = m === 'matrix' || ((b.dataset.l === 'lanes' || b.dataset.l === 'force') && m !== 'data') || (b.dataset.l === 'radial' && m === 'model'); });
     $('#find-wrap').hidden = m === 'matrix';
     const hb = $('#health-bar'); if (hb) hb.hidden = m !== 'schema';
@@ -1641,6 +1642,7 @@ user:* viewer document:readme
   $('#cards-select').addEventListener('change', () => { S.ui.cards = $('#cards-select').value; Graph.setCardsMode(S.ui.cards); persist(); });
   $('#edges-select').addEventListener('change', () => {
     const v = $('#edges-select').value;
+    if (Graph.mode === 'schema') { S.ui.schemaEdges = v; Graph.setSchemaEdges(v); persist(); return; }
     S.ui.derived = v !== 'tuples'; S.ui.derivedOnly = v === 'derived';
     const list = S.ui.derived ? computeDerived() : null;
     Graph.setDerived(list, S.ui.derivedOnly);
@@ -2103,6 +2105,7 @@ user:* viewer document:readme
     Graph.setSubjects(!!S.ui.subjectEdges); $('#btn-subjects').setAttribute('aria-pressed', String(!!S.ui.subjectEdges));
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
     if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
+    if (S.ui.schemaEdges) Graph.setSchemaEdges(S.ui.schemaEdges);
     if (S.ui.scope) { Graph.setScope(S.ui.scope); $$('#scope-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.s === S.ui.scope))); }
     if (S.ui.proofOrder) Graph.setProofOrder(S.ui.proofOrder);
     // older versions could create stores with the same name (an example and a shared copy of it)

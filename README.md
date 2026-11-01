@@ -21,7 +21,8 @@ wildcard/exclusion set algebra for ListUsers).
   diff a draft against a written version, see the tuple change log and replay it.
 - **Model DSL editor** (schema 1.1) with diagnostics, formatting and model-to-graph sync.
 - **Four views of the same store**
-  - *Schema* – one card per type with its relations, cross-type links as edges.
+  - *Schema* – one card per type with its relations, cross-type links as edges; the *edges* menu shows
+    what tuples may assign, the "X from Y" (derived) links, or both.
   - *Resolution* – one relation drawn as the tree Check walks: any-of / all-of / but-not,
     directly assigned subjects, computed relations and "X from Y" branches. It follows the
     query's relation (or any relation you pin) and the trace lights up the branch being tried,

@@ -245,6 +245,8 @@
     // into one edge per relation (click the grouped edge), or all of them (splitDerived)
     let splitDerived = false; const splitPairs = new Set();
     function setSplitDerived(on) { splitDerived = !!on; splitPairs.clear(); if (mode === 'data') render(true); }
+    let schemaEdges = 'both';
+    function setSchemaEdges(m) { schemaEdges = ['tuples', 'both', 'derived'].includes(m) ? m : 'both'; freshNext = true; if (mode === 'schema') render(true); }
     function setDerived(list, only) { derivedAccess = list || null; derivedOnly = !!(list && only); freshNext = true; if (mode === 'data') render(true); }
     // resolution view: which relation is drawn. null = follow the current query.
     function resolutionKey() {
@@ -272,7 +274,9 @@
       if (!g0 || !g0.nodes.length) return null;
       if (mode === 'schema') {
         const nodes = g0.nodes.map((n) => Object.assign({}, n, { collapsed: collapsed.has(n.id) }));
-        return { nodes, edges: g0.edges.map((e) => Object.assign({}, e)), clusters: [] };
+        // tuples: which subject types a tuple may assign (direct); derived: "X from Y" links between types
+        const keep = (e) => schemaEdges === 'both' || (schemaEdges === 'tuples' ? e.kind === 'direct' : e.kind !== 'direct');
+        return { nodes, edges: g0.edges.filter(keep).map((e) => Object.assign({}, e)), clusters: [] };
       }
       if (mode === 'model') {
         const key = resolutionKey();
@@ -2022,7 +2026,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, restorePins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, setSplitDerived, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, setSplitDerived, setSchemaEdges, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,
