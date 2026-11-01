@@ -160,6 +160,11 @@
               <button class="menu-item" id="gm-tidy" title="Lay the whole graph out afresh (nodes otherwise stay where they are while you edit)">Tidy layout</button>
               <button class="menu-item" id="gm-clear" title="Clear the proof walk, focus and highlights but keep every node where you put it (Esc does the same)">Clear highlights, keep layout</button>
               <button class="menu-item" id="gm-reset" title="Forget dragged positions in this view">Reset moved nodes</button>
+              <div class="menu-title">Derived edges</div>
+              <div class="seg xs" id="split-seg" title="A subject with several derived relations on the same object: one edge labelled “viewer +2”, or one edge per relation">
+                <button data-sp="0" aria-pressed="true">grouped</button>
+                <button data-sp="1" aria-pressed="false">one per relation</button>
+              </div>
               <div class="menu-title">Data view shows</div>
               <div class="seg xs" id="scope-seg">
                 <button data-s="auto" aria-pressed="true" title="Everything on small stores; on big ones the neighbourhood of the query, or one node per type">Auto</button>

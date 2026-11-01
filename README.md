@@ -111,6 +111,8 @@ from the site itself. Static page sources live in `src/site/`.
 - **Big stores** (over 60 nodes): the data view shows the query's neighbourhood (two hops, `+N`
   handles to expand) or, without a query, one node per type (`+` expands). *Data view shows* in the
   ⋯ menu and the pill at the bottom switch between auto / all / near / by type.
+- **Grouped derived edges:** several derived relations from one subject to one plain node share an edge
+  ("viewer +2 ▸"); click it for one edge per relation (Shift-click folds back), or ⋯ → *Derived edges*.
 - **Bundling:** three or more subjects of one type whose only tuple points at the same slot become
   one "N users" node; `+` opens it.
 - **Labels** are placed by priority (hovered, highlighted, then the rest), moved along their edge if

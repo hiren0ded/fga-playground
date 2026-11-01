@@ -1951,6 +1951,10 @@ user:* viewer document:readme
     const pins = Graph.resetView();
     if (pins) toast(`View reset — ${Object.keys(pins).length} dragged node${Object.keys(pins).length === 1 ? '' : 's'} put back`, { label: 'Undo', run: () => Graph.restorePins(pins) });
   });
+  const syncSplit = () => $$('#split-seg button').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.sp === '1') === !!S.ui.splitDerived)));
+  $$('#split-seg button').forEach((b) => b.addEventListener('click', () => { S.ui.splitDerived = b.dataset.sp === '1'; Graph.setSplitDerived(S.ui.splitDerived); syncSplit(); persist(); }));
+  if (S.ui.splitDerived) Graph.setSplitDerived(true); syncSplit();
+  Graph.on('splitPair', ({ user, object, n }) => toast(`${user} → ${object}: ${n} derived relations, one edge each — click one for its proof · Shift-click folds them back`));
   $('#gm-clear').addEventListener('click', () => { gmenu.hidden = true; NodeMenu.close(); CtxMenu.close(); Graph.resetView({ keepLayout: true }); });
   Graph.on('reset', () => { S.proofBack = null; S.stepBack = null; if (S.ui.derived) { /* keep derived edges */ } });
   Graph.on('proofCopy', (title) => { const [user, relation, object] = String(title || '').split(' '); if (user && relation && object) Proof.copyMarkdown({ user, relation, object, context: Query.contextObj() }); });

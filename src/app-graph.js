@@ -241,6 +241,10 @@
     }
     function toggleCard(id, on) { cardOverride.set(id, !!on); render(true); }
     // only: draw just the derived grants (who has access that no tuple states), not the tuples themselves
+    // derived edges into a plain node are grouped per subject → object ("viewer +2"); a pair can be split
+    // into one edge per relation (click the grouped edge), or all of them (splitDerived)
+    let splitDerived = false; const splitPairs = new Set();
+    function setSplitDerived(on) { splitDerived = !!on; splitPairs.clear(); if (mode === 'data') render(true); }
     function setDerived(list, only) { derivedAccess = list || null; derivedOnly = !!(list && only); freshNext = true; if (mode === 'data') render(true); }
     // resolution view: which relation is drawn. null = follow the current query.
     function resolutionKey() {
@@ -450,9 +454,11 @@
           const id = `drv:${d.user}→${d.object}#${d.relation}`;
           if (seen.has(`${d.user}|${toSlot || d.object}`) && !toSlot && !derivedOnly) continue; // a plain node already has a tuple edge from this subject
           // into a plain node, one edge per subject → object pair carries every derived relation
-          const same = !toSlot && edges.find((x) => x.kind === 'derived' && x.access && !x.toSlot && x.from === d.user && x.to === d.object);
-          if (same) { same.allRels.push(d.relation); same.label = `${same.allRels[0]} +${same.allRels.length - 1}`; continue; }
-          edges.push({ id, kind: 'derived', access: true, from: d.user, to: d.object, fromSlot: null, toSlot, tupleIds: [], rel: d.relation, rels: [d.relation], labels: [], usersets: [], conditions: [], contextual: false, wildcard: !!d.wildcard, label: toSlot ? '' : d.relation, user: d.user, relation: d.relation, object: d.object, allRels: [d.relation] });
+          const pairKey = `${d.user}>${d.object}`, split = splitDerived || splitPairs.has(pairKey);
+          const same = !toSlot && !split && edges.find((x) => x.kind === 'derived' && x.access && !x.toSlot && x.from === d.user && x.to === d.object);
+          if (same) { same.allRels.push(d.relation); same.label = `${same.allRels[0]} +${same.allRels.length - 1} ▸`; continue; }
+          edges.push({ id, kind: 'derived', access: true, from: d.user, to: d.object, fromSlot: null, toSlot, tupleIds: [], rel: d.relation, rels: [d.relation], labels: [], usersets: [], conditions: [], contextual: false, wildcard: !!d.wildcard, label: toSlot ? '' : d.relation, user: d.user, relation: d.relation, object: d.object, allRels: [d.relation], pairKey, split: !toSlot && splitPairs.has(pairKey) });
+          if (split) edges[edges.length - 1].id += `:${d.relation}`;
           if (toSlot) toN.rowMap.get(d.relation).derived++;
         }
       }
@@ -1062,7 +1068,12 @@
         drawEdgeLabel(sel.select('g.lbl'), e, dur);
       });
       eg.on('dblclick', (ev, e) => { if (e.access) { ev.stopPropagation(); hideTip(); emit('runCheck', { user: e.user, relation: e.relation, object: e.object }); } })
-        .on('click', (ev, e) => { if (!e.access || locked()) return; ev.stopPropagation(); hideTip(); const pr = proofFor(e); if (pr) showProof(pr, { pin: true, lock: true, title: `${e.user} ${e.relation} ${e.object}` }); })
+        .on('click', (ev, e) => {
+          if (!e.access || locked()) return; ev.stopPropagation(); hideTip();
+          // a grouped edge opens into one edge per relation; Shift-click a split edge folds the pair back
+          if (e.allRels && e.allRels.length > 1) { splitPairs.add(e.pairKey); render(true); emit('splitPair', { user: e.user, object: e.object, n: e.allRels.length }); return; }
+          if (ev.shiftKey && e.split) { splitPairs.delete(e.pairKey); render(true); return; }
+          const pr = proofFor(e); if (pr) showProof(pr, { pin: true, lock: true, title: `${e.user} ${e.relation} ${e.object}` }); })
         .on('mouseenter', function (ev, e) {
           d3.select(this).classed('hover', true).raise();
           showTip(ev, tipForEdge(e));
@@ -1312,7 +1323,8 @@
     function tipForEdge(e) {
       if (mode === 'data' && e.access) {
         const steps = stepsFor(e);
-        const more = e.allRels && e.allRels.length > 1 ? `<div class="sub">${esc(e.user)} also holds, without a tuple: <b>${esc(e.allRels.slice(1).join(', '))}</b> (open ${esc(e.object)} as a card for one edge per relation)</div>` : '';
+        if (e.allRels && e.allRels.length > 1) return `<code>${esc(e.user)} → ${esc(e.object)}</code><div class="sub">${e.allRels.length} derived relations on one edge — no tuple states any of them:</div><div class="sub"><b>${e.allRels.map(esc).join(', ')}</b></div><div class="sub">click to show one edge per relation (each with its own proof) · or ⋯ → Derived edges: one per relation</div>`;
+        const more = e.split ? '<div class="sub">Shift-click to fold this pair back into one edge</div>' : '';
         return `<code>${esc(e.user)} ${esc(e.relation)} ${esc(e.object)}</code>${more}<div class="sub">derived — no tuple says this. Check follows these steps (numbered on the graph):</div>${steps ? stepsHtml(steps) : `<div class="sub">${esc(e.proofError || 'not allowed any more — the store changed')}</div>`}<div class="sub">click to pin the walk · double-click to run this Check</div>`;
       }
       if (mode === 'data' && e.derived) {
@@ -1743,7 +1755,7 @@
       proofLock = false; svg.node().classList.remove('locked');
       proofWalk = null; proofPreview = null; proofObjects = new Set();
       focus = null; hoverHl = null; currentHl = null; lastOpts = {};
-      if (!keep) { cardOverride.clear(); expandedNodes.clear(); openBundles.clear(); expandedTypes.clear(); freshNext = true; }
+      if (!keep) { cardOverride.clear(); expandedNodes.clear(); openBundles.clear(); expandedTypes.clear(); splitPairs.clear(); freshNext = true; }
       userMoved = false;
       gBadges.selectAll('*').remove();
       emit('reset');
@@ -1992,7 +2004,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, restorePins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, setSplitDerived, showProof, clearProof, resetView, setScope, tidy, get scope() { return scopeMode; }, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,
