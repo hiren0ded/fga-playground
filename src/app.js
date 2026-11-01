@@ -1452,11 +1452,27 @@ user:* viewer document:readme
         st.usersOfType(ut).forEach((u) => { if (u.split(':')[0] !== ut) return; const any = objects.some((o) => cells.has(`${u}|${o}`) || wild.has(`${ut}|${o}`)); if (pure || any) rows.push({ id: u, type: ut }); });
         if (objects.some((o) => wild.has(`${ut}|${o}`))) rows.push({ id: `${ut}:*`, type: ut, wildcard: true });
       });
+      // ListUsers can't name who a "but not" removed when the exclusion is a public grant (user:*), so
+      // a cell with no access is checked once more: if a branch was taken away by an exclusion, it is ✕
+      const hasExclusion = (() => { let f = false; const t = m.typeMap.get(type); const seen = new Set(); const visit = (tn, rn) => { const k = `${tn}#${rn}`; if (seen.has(k) || f) return; seen.add(k); const tt = m.typeMap.get(tn), rr = tt && tt.relMap.get(rn); if (!rr) return; FGA.walkRewrite(rr.rewrite, (n) => { if (n.kind === 'difference') f = true; else if (n.kind === 'computed') visit(tn, n.relation); else if (n.kind === 'ttu') { const ts = tt.relMap.get(n.tupleset); (ts ? ts.directTypes : []).forEach((e) => visit(e.type, n.computed)); } else if (n.kind === 'this') n.types.forEach((e) => { if (e.relation) visit(e.type, e.relation); }); }); }; if (t) visit(type, relation); return f; })();
+      const exMemo = new Map();
+      let exBudget = 600;
+      const excludedByCheck = (u, obj) => {
+        const k = `${u}|${obj}`;
+        if (exMemo.has(k)) return exMemo.get(k);
+        let v = false;
+        if (hasExclusion && exBudget-- > 0) {
+          try { const res = FGA.check(m, st, { user: u, relation, object: obj, context: {} }); v = !res.allowed && !!res.trace && res.trace.frames.some((f) => f.excludedBy); } catch (e) { v = false; }
+        }
+        exMemo.set(k, v);
+        return v;
+      };
       const state = (row, obj) => {
         if (row.wildcard) return wild.get(`${row.type}|${obj}`) || '';
         const c = cells.get(`${row.id}|${obj}`);
         if (c) return c;
-        return wild.has(`${row.type}|${obj}`) ? 'public' : '';
+        if (wild.has(`${row.type}|${obj}`)) return 'public';
+        return excludedByCheck(row.id, obj) ? 'excluded' : '';
       };
       return { objects, rows, state };
     }
@@ -1556,7 +1572,6 @@ user:* viewer document:readme
       let why = '';
       if (stNow === 'direct') why = 'a tuple says so';
       else if (stNow === 'public') why = `every ${esc(u.split(':')[0])} holds it through a public wildcard grant`;
-      else if (stNow === 'excluded') why = 'removed by a "but not" exclusion';
       else if (stNow === 'derived') {
         try { const res = FGA.check(m, st, { user: u, relation: rel, object: o, context: {} }); const steps = res.allowed && res.root ? FGA.proofSteps(res.root.proof, Graph.proofOrder) : []; why = steps.length ? `Check follows these steps:<ol class="steps">${steps.map((x) => `<li><b>${x.n}</b><span>${esc(x.text)}</span></li>`).join('')}</ol>` : (res.allowed ? 'allowed' : 'not allowed'); } catch (e) { why = esc(e.message); }
       } else {
