@@ -194,6 +194,9 @@
     const prevPos = {}; let freshNext = false;
     // ELK (layered, port-aware, orthogonal edges) for the data view; loaded on first use
     let elk = null, elkLoading = null, elkFailed = false, layoutVersion = 0;
+    // ELK results by graph shape: the same graph always gets the same picture (Reset, Tidy, coming back)
+    const elkCache = new Map();
+    const elkSig = (L) => viewKey() + '|' + L.nodes.map((n) => `${n.id}:${Math.round(n.width)}x${Math.round(n.height)}`).join(',') + '|' + L.edges.map((e) => `${e.from}>${e.to}:${e.fromSlot || ''}>${e.toSlot || ''}:${e.text || ''}`).join(',');
     let proofOrder = 'check'; // 'check' = numbered as Check resolves (object → subject); 'flow' = subject → goal
     let proofLock = false;    // locked: clicks on the graph cannot change the selection or clear the walk
     let typeIndex = new Map(), relIndex = new Map();
@@ -579,7 +582,9 @@
     function layoutForce(vg) {
       vg.nodes.forEach(sizeNode);
       vg.edges.forEach((e) => { e.text = edgeText(e); e.points = null; });
-      const nodes = vg.nodes.map((n) => Object.assign(n, { x: n.x ?? Math.random() * 600, y: n.y ?? Math.random() * 400 }));
+      // seeded, so the same graph settles the same way every time
+      let seed = 1234567; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+      const nodes = vg.nodes.map((n) => Object.assign(n, { x: n.x ?? rnd() * 600, y: n.y ?? rnd() * 400 }));
       markParallel(vg.edges);
       const links = vg.edges.map((e) => ({ source: e.from, target: e.to }));
       const sim = d3.forceSimulation(nodes)
@@ -588,6 +593,7 @@
         .force('collide', d3.forceCollide((d) => Math.max(d.width, d.height) / 2 + 18))
         .force('x', d3.forceX(0).strength(0.03)).force('y', d3.forceY(0).strength(0.05))
         .stop();
+      if (sim.randomSource) sim.randomSource(rnd);
       for (let i = 0; i < 320; i++) sim.tick();
       const minX = Math.min(...nodes.map((n) => n.x - n.width / 2)), minY = Math.min(...nodes.map((n) => n.y - n.height / 2));
       nodes.forEach((n) => { n.x = n.x - minX + 40; n.y = n.y - minY + 40; delete n.vx; delete n.vy; delete n.index; });
@@ -752,7 +758,10 @@
           return { id: `x${i}`, sources: [src], targets: [dst], labels: w ? [{ id: `x${i}l`, text: e.text, width: w, height: 18 }] : [] };
         }),
       };
-      return elk.layout(graph).then((res) => {
+      const sig = elkSig(L);
+      const cached = elkCache.get(sig);
+      const run = cached ? Promise.resolve(cached) : elk.layout(graph).then((res) => { elkCache.set(sig, res); if (elkCache.size > 40) elkCache.delete(elkCache.keys().next().value); return res; });
+      return run.then((res) => {
         if (version !== layoutVersion || curL !== L || mode !== 'data') return;
         const pos = new Map(res.children.map((c) => [c.id, c]));
         L.nodes.forEach((n) => { const c = pos.get(n.id); if (c) { n.x = c.x + n.width / 2; n.y = c.y + n.height / 2; } });
@@ -771,7 +780,7 @@
         rememberPositions(L);
         if (!userMoved) fit(true);
         afterRender();
-      }).catch(() => { /* keep the dagre layout */ });
+      }).catch(() => { if (L.pendingDraw) L.pendingDraw(); });
     }
     function roundedPath(pts, r = 7) {
       if (pts.length < 3) return `M${pts[0].x},${pts[0].y} L${pts[pts.length - 1].x},${pts[pts.length - 1].y}`;
@@ -938,15 +947,29 @@
           if (defs.select(`#${hid}`).empty()) defs.append('marker').attr('id', hid).attr('viewBox', '0 0 12 12').attr('refX', 10).attr('refY', 6).attr('markerWidth', 11).attr('markerHeight', 11).attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse').append('path').attr('d', 'M1.5,1.5 L10.5,6 L1.5,10.5 z').attr('class', 'mk-hollow').attr('stroke', relColor(r));
         });
       }
-      draw(L, animate && lastMode === mode);
       const modeChanged = lastMode !== mode;
-      lastMode = mode;
-      renderProofBar();
-      renderScopePill();
-      if (!L.stabilized || modeChanged || !userMoved) { fit(false); userMoved = false; }
-      rememberPositions(L);
-      afterRender();
-      if (!L.stabilized && useElk() && (fresh || L.nodes.length > 1)) loadElk().then(() => elkLayout(L, layoutVersion)).catch(() => {});
+      const wantElk = !L.stabilized && useElk() && (fresh || L.nodes.length > 1);
+      const finish = () => {
+        L.pendingDraw = null;
+        draw(L, animate && lastMode === mode);
+        lastMode = mode;
+        renderProofBar();
+        renderScopePill();
+        if (!L.stabilized || modeChanged || !userMoved) { fit(false); userMoved = false; }
+        rememberPositions(L);
+        afterRender();
+      };
+      if (wantElk && elk) {
+        // ELK is loaded: skip the quick dagre picture (it would only flash and then rearrange);
+        // draw it only if ELK is slow or fails
+        L.pendingDraw = finish;
+        const v = layoutVersion;
+        setTimeout(() => { if (L.pendingDraw && curL === L && v === layoutVersion) finish(); }, 400);
+        elkLayout(L, v).then(() => { if (curL === L) { L.pendingDraw = null; lastMode = mode; renderScopePill(); } });
+        return;
+      }
+      finish();
+      if (wantElk) loadElk().then(() => elkLayout(L, layoutVersion)).catch(() => {});
     }
     // scope pill: how much of a big store is on screen, and how to see more
     function renderScopePill() {
