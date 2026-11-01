@@ -1529,6 +1529,10 @@ user:* viewer document:readme
         } catch (e) { walk = null; }
       }
       el.innerHTML = head + walkHtml + `<table class="mx">${thead}<tbody>${body}</tbody></table>`;
+      // legend counts: how many cells of each kind this relation has
+      const kinds = { direct: 0, derived: 0, public: 0, excluded: 0, none: 0 };
+      el.querySelectorAll('td.c').forEach((td) => { const k = td.dataset.s || 'none'; if (k in kinds) kinds[k]++; });
+      $$('#legend-matrix .mx-lg').forEach((b) => { const n = kinds[b.dataset.k] || 0; b.querySelector('.n').textContent = `(${n})`; b.classList.toggle('zero', !n); });
       $('#mx-sum').textContent = `${now.rows.length} subject${now.rows.length === 1 ? '' : 's'} × ${now.objects.length} object${now.objects.length === 1 ? '' : 's'} · ${nDirect} direct · ${nDerived} derived${before ? ` · vs compared model: ${nGained} gained, ${nLost} lost` : ''}`;
       wire();
       wireWalk();
@@ -1576,6 +1580,14 @@ user:* viewer document:readme
         c.addEventListener('mouseleave', () => { tip.hidden = true; if (c.dataset.t) c.setAttribute('title', c.dataset.t); });
       });
     }
+    // legend: hover a meaning to spot its cells, click to keep it
+    let spotPinned = null;
+    const spot = (k) => { if (k) el.dataset.spot = k; else delete el.dataset.spot; $$('#legend-matrix .mx-lg').forEach((b) => b.classList.toggle('on', b.dataset.k === k)); };
+    $$('#legend-matrix .mx-lg').forEach((b) => {
+      b.addEventListener('mouseenter', () => spot(b.dataset.k));
+      b.addEventListener('mouseleave', () => spot(spotPinned));
+      b.addEventListener('click', () => { spotPinned = spotPinned === b.dataset.k ? null : b.dataset.k; spot(spotPinned); });
+    });
     function hot(td, on) { const o = td.dataset.o; const th = el.querySelector(`th.obj[data-o="${CSS.escape(o)}"]`); if (th) th.classList.toggle('hot', on); const rh = td.parentElement.querySelector('th'); if (rh) rh.classList.toggle('hot', on); }
     function tipFor(td) {
       const u = td.dataset.u, o = td.dataset.o, rel = sel().relation, stNow = td.dataset.s, stBefore = td.dataset.b;
@@ -1590,7 +1602,9 @@ user:* viewer document:readme
       }
       const diff = stBefore !== undefined && stBefore !== null && td.dataset.b !== stNow && (td.classList.contains('added') || td.classList.contains('removed')) ? `<div class="sub">${td.classList.contains('added') ? 'gained' : 'lost'} compared with the selected model version (was: ${esc(stBefore || 'none')})</div>` : '';
       const has = ['direct', 'derived', 'public'].includes(stNow);
-      return `<code>${esc(u)} ${esc(rel)} ${esc(o)}</code><div class="sub">${stNow ? esc(stNow) + ' — ' : ''}${why}</div>${diff}<div class="sub">${has ? 'click to walk these steps here (matrix or tree) · double-click to walk them on the data graph' : 'click to see why not, here · double-click to see it on the data graph'}</div>`;
+      const KIND = { direct: ['●', 'direct', 'allowed — a tuple says so'], derived: ['◌', 'derived', 'allowed — no tuple says so; it comes through a team, parent or rewrite'], public: ['■', 'public', 'allowed — a wildcard grants it to everyone of this type'], excluded: ['✕', 'excluded', 'not allowed — the access is there, but a “but not” takes it away'], none: ['·', 'empty', 'not allowed — nothing grants it'] };
+      const kd = KIND[stNow || 'none'] || KIND.none;
+      return `<div class="mx-tip-kind k-${stNow || 'none'}"><b>${kd[0]} ${kd[1]}</b><span>${kd[2]}</span></div><code>${esc(u)} ${esc(rel)} ${esc(o)}</code><div class="sub">${why}</div>${diff}<div class="sub">${has ? 'click to walk these steps here (matrix or tree) · double-click to walk them on the data graph' : 'click to see why not, here · double-click to see it on the data graph'}</div>`;
     }
     function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; moveTip(ev); }
     function moveTip(ev) {

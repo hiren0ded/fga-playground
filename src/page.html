@@ -203,13 +203,13 @@
           <span><b>∨</b> any of · <b>∧</b> all of · <b>∖</b> but not</span><span><i></i>direct subjects</span><span><i class="computed"></i>computed (implied)</span><span><i class="ttu"></i>from (tuple-to-userset)</span><span><b>↻</b> recursive</span><span><b>+</b> expand a branch</span>
         </div>
         <div class="legend mx-legend" id="legend-matrix" hidden>
-          <span title="A tuple grants this relation to this subject directly"><b class="mx-k direct"></b> <b>direct</b> — a tuple says so</span>
-          <span title="Allowed without a direct tuple: through a computed relation, a userset (team#member) or a parent (X from Y)"><b class="mx-k derived"></b> <b>derived</b> — allowed via a team, parent or rewrite</span>
-          <span title="Allowed because of a wildcard tuple such as user:*"><b class="mx-k public"></b> <b>public</b> — granted to every user (type:*)</span>
-          <span title="The subject would have access, but a “but not” relation removes it"><b class="mx-x">✕</b> <b>excluded</b> — had access, a “but not” took it away</span>
-          <span title="Not allowed: nothing in the model and tuples leads this subject to this relation"><b class="mx-none">·</b> <b>empty</b> — no access, nothing grants it</span>
+          <button class="mx-lg" data-k="direct" title="A tuple grants this relation to this subject directly. Hover to spot these cells, click to keep them highlighted"><b class="mx-k direct"></b> <b>direct</b> <span class="n"></span> — a tuple says so</button>
+          <button class="mx-lg" data-k="derived" title="Allowed without a direct tuple: through a computed relation, a userset (team#member) or a parent (X from Y). Hover to spot these cells, click to keep them highlighted"><b class="mx-k derived"></b> <b>derived</b> <span class="n"></span> — allowed via a team, parent or rewrite</button>
+          <button class="mx-lg" data-k="public" title="Allowed because of a wildcard tuple such as user:*. Hover to spot these cells, click to keep them highlighted"><b class="mx-k public"></b> <b>public</b> <span class="n"></span> — granted to every user (type:*)</button>
+          <button class="mx-lg" data-k="excluded" title="The subject would have access, but a “but not” relation removes it. Hover to spot these cells, click to keep them highlighted"><b class="mx-x">✕</b> <b>excluded</b> <span class="n"></span> — had access, a “but not” took it away</button>
+          <button class="mx-lg" data-k="none" title="Not allowed: nothing in the model and tuples leads this subject to this relation. Hover to spot these cells, click to keep them highlighted"><b class="mx-none">·</b> <b>empty</b> <span class="n"></span> — no access, nothing grants it</button>
           <span id="legend-mx-diff" hidden><b class="dadd">+ gained</b> <b class="drem">− lost</b> vs the compared model</span>
-          <span class="mx-legend-hint">hover a cell for its proof or why-not · click to Check it here · double-click to walk it on the data graph</span>
+          <span class="mx-legend-hint">hover a meaning to spot its cells · hover a cell for its proof or why-not · click to Check it here · double-click to walk it on the data graph</span>
         </div>
         <div class="legend" id="legend-data" hidden>
           <span class="rel-chips" id="rel-chips" hidden></span><span><b>▭</b> card: one slot per relation</span><span><i class="computed"></i>implied (computed)</span><span><i class="ttu"></i>from parent (tuple-to-userset)</span><span><i class="derived"></i>⇢ derived access (hollow arrow)</span><span><b class="pb-k">1 2 3</b> proof steps</span><span><b>:*</b> wildcard</span><span><b>⚡</b> condition</span><span><b>+</b> open as a card</span>
