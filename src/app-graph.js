@@ -1330,31 +1330,39 @@
       if (st.kind === 'computed') return down ? `${st.object}#${st.relation} ⇐ ${st.implied}` : `${st.implied} ⇒ ${st.object}#${st.relation}`;
       if (st.kind === 'ttu') return down ? `${st.object}#${st.relation} ⇐ ${st.computed} from ${st.tupleset}` : `${st.computed} from ${st.tupleset} ⇒ ${st.object}#${st.relation}`;
       if (st.kind === 'and') return down ? `${st.object}#${st.relation}: ∧ all branches` : `∧ all hold → ${st.object}#${st.relation}`;
+      if (st.kind === 'check') return `${st.user} ${st.ok ? 'is' : 'is not'} ${st.relation} of ${st.object}`;
+      if (st.kind === 'direct') return `no ${st.relation} tuple for ${st.user} on ${st.object}`;
+      if (st.kind === 'noparent') return `${st.object} has no ${st.tupleset}`;
+      if (st.kind === 'base') return `base of ${st.relation} holds`;
       return st.text;
     };
     function stepsHtml(steps) {
-      return `<ol class="steps">${steps.map((st) => `<li><b>${st.n}</b><span>${esc(st.text)}</span></li>`).join('')}</ol>`;
+      return `<ol class="steps">${steps.map((st) => `<li class="${st.ok === false || st.excluded ? 'fail' : ''}"><b>${st.n}</b><span>${esc(st.text)}</span></li>`).join('')}</ol>`;
     }
     function proofHlOf(steps) {
       const hl = { dataNodes: {}, dataEdges: {}, modelEdges: {}, tupleIds: [] };
+      const put = (m, k, v) => { if (!m[k] || (v === 'fail' && m[k] !== 'fail')) m[k] = v; };
       steps.forEach((st) => {
-        if (st.tupleId != null) { hl.dataEdges[`t${st.tupleId}`] = 'ok'; hl.tupleIds.push(st.tupleId); }
-        [st.from, st.to].forEach((k) => { if (!k) return; hl.dataNodes[k] = 'ok'; hl.dataNodes[k.split('#')[0]] = 'ok'; });
-        if (st.fromObject) hl.dataNodes[st.fromObject] = 'ok';
-        if (st.object) hl.dataNodes[st.object] = 'ok';
-        if (st.gid) hl.modelEdges[st.gid] = 'ok';
+        const v = st.ok === false || st.excluded ? 'fail' : 'ok';
+        if (st.tupleId != null) { put(hl.dataEdges, `t${st.tupleId}`, v); hl.tupleIds.push(st.tupleId); }
+        [st.from, st.to].forEach((k) => { if (!k) return; put(hl.dataNodes, k, v); put(hl.dataNodes, k.split('#')[0], v === 'fail' && st.kind !== 'check' ? 'read' : v); });
+        if (st.fromObject) put(hl.dataNodes, st.fromObject, 'read');
+        if (st.object) put(hl.dataNodes, st.object, v === 'fail' ? 'read' : 'ok');
+        if (st.gid) put(hl.modelEdges, st.gid, v);
       });
       return hl;
     }
-    function showProof(proof, opts = {}) {
-      const steps = proof ? FGA.proofSteps(proof, proofOrder) : [];
+    function showProof(src, opts = {}) {
+      // src: a proof (from a Check) or { stepsFor(order) } for any other numbered walk (a denial)
+      const stepsFor = !src ? () => [] : typeof src.stepsFor === 'function' ? src.stepsFor : (o) => FGA.proofSteps(src, o);
+      const steps = stepsFor(proofOrder);
       if (!steps.length) { clearProof({ force: true }); return; }
       const objs = new Set();
       steps.forEach((st) => { if (st.object) objs.add(st.object); if (st.fromObject) objs.add(st.fromObject); [st.from, st.to].forEach((k) => { if (k && k.includes('#')) objs.add(k.split('#')[0]); }); });
       const canOpen = (o) => { const t = modelRef && modelRef.typeMap.get(o.split(':')[0]); return !!(t && t.relations.length); };
       const isCardNow = (o) => !!(curL && curL.nodes.some((n) => n.id === o && n.kind === 'inst'));
       const wasOnly = !!(proofWalk && proofWalk.only);
-      proofWalk = { proof, steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto, only: opts.only !== undefined ? !!opts.only : !!opts.lock };
+      proofWalk = { stepsFor, steps, title: opts.title || '', back: opts.back || null, auto: !!opts.auto, denial: !!opts.denial, only: opts.only !== undefined ? !!opts.only : !!opts.lock };
       proofLock = !!opts.lock;
       svg.node().classList.toggle('locked', proofLock);
       proofPreview = null;
@@ -1385,7 +1393,7 @@
       const walk = mode === 'data' ? proofWalk : null;
       pbar.hidden = !walk;
       if (!walk) return;
-      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k">proof</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><span class="seg xs pb-only" title="Only the path: lay out just the nodes, slots and edges this proof uses. Whole graph: keep everything, dimmed"><button data-only="1" aria-pressed="${!!walk.only}">only the path</button><button data-only="0" aria-pressed="${!walk.only}">whole graph</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
+      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k${walk.denial ? ' no' : ''}">${walk.denial ? 'why not' : 'proof'}</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><span class="seg xs pb-only" title="Only the path: lay out just the nodes, slots and edges this proof uses. Whole graph: keep everything, dimmed"><button data-only="1" aria-pressed="${!!walk.only}">only the path</button><button data-only="0" aria-pressed="${!walk.only}">whole graph</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}${st.ok === false || st.excluded ? ' fail' : ''}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
       $$('.pb-step', pbar).forEach((b) => {
         const st = walk.steps[+b.dataset.i];
         b.addEventListener('mouseenter', () => flashStep(st));
@@ -1401,7 +1409,7 @@
       if (o !== 'check' && o !== 'flow') return;
       proofOrder = o;
       emit('proofOrder', o);
-      if (proofWalk) { proofWalk.steps = FGA.proofSteps(proofWalk.proof, proofOrder); renderProofBar(); placeBadges(); }
+      if (proofWalk) { proofWalk.steps = proofWalk.stepsFor(proofOrder); renderProofBar(); placeBadges(); }
     }
     function flashStep(st) {
       const ids = [];
@@ -1438,6 +1446,8 @@
         return slotPos(st.to, byId, 'right');
       }
       if (st.kind === 'and' || st.kind === 'not') return slotPos(`${st.object}#${st.relation}`, byId, 'right');
+      if (st.kind === 'check' || st.kind === 'base') return slotPos(st.to, byId, 'right');
+      if (st.kind === 'direct' || st.kind === 'noparent') return slotPos(st.to, byId, 'left');
       return null;
     }
     function placeBadges() {
@@ -1451,7 +1461,7 @@
         let x = p.x, guard = 0;
         while (guard++ < 12 && placed.some((q) => Math.hypot(q.x - x, q.y - p.y) < 19)) x += 19;
         placed.push({ x, y: p.y });
-        const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}`).attr('transform', `translate(${x},${p.y})`);
+        const g = gBadges.append('g').datum(st).attr('class', `badge k-${st.kind}${st.ok === false || st.excluded ? ' fail' : ''}`).attr('transform', `translate(${x},${p.y})`);
         g.append('circle').attr('r', 9);
         g.append('text').attr('y', 3.5).attr('text-anchor', 'middle').text(st.n);
         g.on('mouseenter', (ev) => showTip(ev, `<code>${st.n}. ${esc(st.text)}</code><div class="sub">${esc(st.why || '')}</div>`)).on('mousemove', moveTip).on('mouseleave', hideTip);
@@ -1593,7 +1603,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, setProofOnly, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

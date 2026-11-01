@@ -503,7 +503,7 @@
       return f;
     };
     trace.emit = (type, frame, text, extra = {}) => {
-      const ev = Object.assign({ idx: trace.events.length, type, frame, text, status: extra.status || 'info', hl: extra.hl || {}, minor: !!extra.minor, detail: extra.detail || null });
+      const ev = Object.assign({ idx: trace.events.length, type, frame, text, status: extra.status || 'info', hl: extra.hl || {}, minor: !!extra.minor, detail: extra.detail || null, meta: extra.meta || null });
       trace.events.push(ev);
       frame.items.push({ event: ev });
       if (type === 'enter') frame.startIdx = ev.idx;
@@ -906,28 +906,28 @@
       case 'this': {
         const tuples = ctx.store.read(object.raw, relation);
         T.reads++;
-        T.emit('read', frame, `Direct assignment ${describeRewrite(node)} → read tuples where object = ${object.raw} and relation = ${relation}: ${tuples.length ? tuples.length + ' found' : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
+        T.emit('read', frame, `Direct assignment ${describeRewrite(node)} → read tuples where object = ${object.raw} and relation = ${relation}: ${tuples.length ? tuples.length + ' found' : 'none'}`, { status: 'read', meta: { kind: 'direct', count: tuples.length }, hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
         let cycle = false;
         for (const t of tuples) {
           const tu = t.user;
           const uNode = tu.wildcard ? `${tu.type}:*` : `${tu.type}:${tu.id}`;
           if (tu.raw === user.raw) {
             if (!condStep(ctx, frame, t).ok) continue;
-            T.emit('match', frame, `${arrowTuple(t)} matches ${user.raw} directly`, { status: 'ok', hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+            T.emit('match', frame, `${arrowTuple(t)} matches ${user.raw} directly`, { status: 'ok', meta: { kind: 'match', tupleId: t.id }, hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
             return { value: true, cycle, via: 'a direct tuple', proof: { kind: 'direct', tuple: t, relation, object: object.raw } };
           }
           if (tu.wildcard && !user.relation && tu.type === user.type) {
             if (!condStep(ctx, frame, t).ok) continue;
-            T.emit('match', frame, `${arrowTuple(t)} is a public (wildcard) grant for every ${tu.type} → it covers ${user.raw}`, { status: 'ok', hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+            T.emit('match', frame, `${arrowTuple(t)} is a public (wildcard) grant for every ${tu.type} → it covers ${user.raw}`, { status: 'ok', meta: { kind: 'match', tupleId: t.id, wildcard: true }, hl: { modelEdges: { [edgeGid(`${tu.type}@self`, modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
             return { value: true, cycle, via: `the public wildcard ${tu.raw}`, proof: { kind: 'wildcard', tuple: t, relation, object: object.raw, user: user.raw } };
           }
           if (tu.relation) {
-            T.emit('note', frame, `${arrowTuple(t)} grants ${relation} to the userset ${tu.raw} → is ${user.raw} a member of it?`, { status: 'info', hl: { dataEdges: { [`t${t.id}`]: 'active' }, dataNodes: { [uNode]: 'active' }, tupleIds: [t.id] } });
+            T.emit('note', frame, `${arrowTuple(t)} grants ${relation} to the userset ${tu.raw} → is ${user.raw} a member of it?`, { status: 'info', meta: { kind: 'userset', tupleId: t.id }, hl: { dataEdges: { [`t${t.id}`]: 'active' }, dataNodes: { [uNode]: 'active' }, tupleIds: [t.id] } });
             if (!condStep(ctx, frame, t).ok) continue;
             const child = checkRec(ctx, user, tu.relation, objectOfUser(tu), frame, path, depth + 1);
             if (child.cycle || child.cycleSeen) cycle = true;
             if (child.result) {
-              T.emit('match', frame, `${user.raw} ∈ ${tu.raw} → ${arrowTuple(t)} applies`, { status: 'ok', hl: { modelEdges: { [edgeGid(relNode(tu.type, tu.relation), modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
+              T.emit('match', frame, `${user.raw} ∈ ${tu.raw} → ${arrowTuple(t)} applies`, { status: 'ok', meta: { kind: 'match', tupleId: t.id, userset: true }, hl: { modelEdges: { [edgeGid(relNode(tu.type, tu.relation), modelNode, 'direct')]: 'ok' }, rewrites: rk(rp, 'ok'), dataEdges: { [`t${t.id}`]: 'ok' }, dataNodes: { [uNode]: 'ok', [object.raw]: 'ok' }, tupleIds: [t.id] } });
               return { value: true, cycle, via: `the userset ${tu.raw}`, proof: { kind: 'userset', tuple: t, relation, object: object.raw, child: child.proof } };
             }
             continue;
@@ -938,7 +938,7 @@
       }
       case 'computed': {
         const from = relNode(object.type, node.relation);
-        T.emit('rewrite', frame, `${relation} includes the computed userset "${node.relation}" → anyone who is ${node.relation} of ${object.raw} is also ${relation}`, { hl: { modelNodes: { [modelNode]: 'active', [from]: 'active' }, modelEdges: { [edgeGid(from, modelNode, 'computed')]: 'active' }, rewrites: rk(rp, 'active') } });
+        T.emit('rewrite', frame, `${relation} includes the computed userset "${node.relation}" → anyone who is ${node.relation} of ${object.raw} is also ${relation}`, { meta: { kind: 'computed', implied: node.relation, gid: edgeGid(from, modelNode, 'computed') }, hl: { modelNodes: { [modelNode]: 'active', [from]: 'active' }, modelEdges: { [edgeGid(from, modelNode, 'computed')]: 'active' }, rewrites: rk(rp, 'active') } });
         const child = checkRec(ctx, user, node.relation, object, frame, path, depth + 1);
         // the sub-check's exit event is what the user sees; stamp its outcome on this branch's edge too
         const last = T.events[T.events.length - 1];
@@ -952,13 +952,13 @@
         for (const pt of uniq((objType(ctx, object.type).relMap.get(node.tupleset)?.directTypes || []).map((e) => e.type))) {
           ttuEdges[edgeGid(relNode(pt, node.computed), modelNode, 'ttu', node.tupleset)] = 'active';
         }
-        T.emit('read', frame, `"${node.computed} from ${node.tupleset}" → read ${object.raw}'s ${node.tupleset} tuples: ${tuples.length ? tuples.map((t) => t.user.raw).join(', ') : 'none'}`, { status: 'read', hl: { modelNodes: { [modelNode]: 'active' }, modelEdges: ttuEdges, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
+        T.emit('read', frame, `"${node.computed} from ${node.tupleset}" → read ${object.raw}'s ${node.tupleset} tuples: ${tuples.length ? tuples.map((t) => t.user.raw).join(', ') : 'none'}`, { status: 'read', meta: { kind: 'ttuRead', tupleset: node.tupleset, computed: node.computed, count: tuples.length }, hl: { modelNodes: { [modelNode]: 'active' }, modelEdges: ttuEdges, rewrites: rk(rp, 'active'), dataNodes: { [object.raw]: 'active' }, dataEdges: idsOf(tuples), tupleIds: tuples.map((t) => t.id) } });
         let cycle = false;
         for (const t of tuples) {
           if (t.user.relation || t.user.wildcard) { T.emit('skip', frame, `${arrowTuple(t)} — tupleset tuples must point at a plain object, skipped`, { status: 'skip', minor: true }); continue; }
           if (!condStep(ctx, frame, t).ok) continue;
           const parentObj = objectOfUser(t.user);
-          T.emit('note', frame, `${parentObj.raw} is a ${node.tupleset} of ${object.raw} → check ${node.computed} on it`, { status: 'info', hl: { dataEdges: { [`t${t.id}`]: 'active' }, dataNodes: { [parentObj.raw]: 'active' }, tupleIds: [t.id] } });
+          T.emit('note', frame, `${parentObj.raw} is a ${node.tupleset} of ${object.raw} → check ${node.computed} on it`, { status: 'info', meta: { kind: 'ttu', tupleId: t.id, tupleset: node.tupleset, computed: node.computed, gid: edgeGid(relNode(parentObj.type, node.computed), modelNode, 'ttu', node.tupleset) }, hl: { dataEdges: { [`t${t.id}`]: 'active' }, dataNodes: { [parentObj.raw]: 'active' }, tupleIds: [t.id] } });
           const child = checkRec(ctx, user, node.computed, parentObj, frame, path, depth + 1);
           if (child.cycle || child.cycleSeen) cycle = true;
           if (child.result) {
@@ -1005,11 +1005,12 @@
         T.emit('branch', frame, `Base: ${describeRewrite(node.base)}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: rk(rp.concat([0]), 'active') } });
         const b = evalRewrite(ctx, frame, node.base, user, relation, object, path, depth, rp.concat([0]));
         if (!b.value) return { value: false, cycle: b.cycle, via: `the base "${describeRewrite(node.base)}" is not satisfied` };
-        T.emit('branch', frame, `Base holds → now the exclusion: but not ${describeRewrite(node.subtract)}`, { status: 'info', hl: { modelNodes: { [modelNode]: 'active' }, rewrites: Object.assign(rk(rp.concat([0]), 'ok'), rk(rp.concat([1]), 'active')) } });
+        T.emit('branch', frame, `Base holds → now the exclusion: but not ${describeRewrite(node.subtract)}`, { status: 'info', meta: { kind: 'exclusion', subtract: describeRewrite(node.subtract) }, hl: { modelNodes: { [modelNode]: 'active' }, rewrites: Object.assign(rk(rp.concat([0]), 'ok'), rk(rp.concat([1]), 'active')) } });
         const s = evalRewrite(ctx, frame, node.subtract, user, relation, object, path, depth, rp.concat([1]));
         const cycle = b.cycle || s.cycle;
         if (s.value) {
-          T.emit('note', frame, `Excluded by "but not ${describeRewrite(node.subtract)}"`, { status: 'fail', hl: { modelNodes: { [modelNode]: 'fail' }, rewrites: rk(rp.concat([1]), 'fail') } });
+          T.emit('note', frame, `Excluded by "but not ${describeRewrite(node.subtract)}"`, { status: 'fail', meta: { kind: 'excluded' }, hl: { modelNodes: { [modelNode]: 'fail' }, rewrites: rk(rp.concat([1]), 'fail') } });
+          frame.baseProof = b.proof || null; frame.excludedBy = describeRewrite(node.subtract);
           return { value: false, cycle, via: `excluded by "but not ${describeRewrite(node.subtract)}"` };
         }
         return { value: true, cycle, via: `${b.via}, and not excluded`, proof: b.proof ? Object.assign({}, b.proof, { notExcluded: describeRewrite(node.subtract) }) : null };
@@ -1436,6 +1437,100 @@
     return { root, steps };
   }
   function proofSteps(proof, order = 'check') { return proofTree(proof, order).steps; }
+
+  // Why a Check was denied: the tree of everything the resolver tried, built from the trace frames,
+  // in the same step vocabulary as proofTree (so the graph, matrix and tree views can draw it), with
+  // the branch that got furthest marked as the nearest miss and the tuples that would flip the answer.
+  function explainDenial(model, store, q, res, order = 'check') {
+    const root = res && res.root;
+    if (!root || root.result === true) return null;
+    const down = order !== 'flow';
+    const subjOf = (u) => (u.wildcard ? `${u.type}:*` : `${u.type}:${u.id}`);
+    const keyOf = (st) => [st.kind, st.tupleId ?? '', st.from || '', st.to || '', st.object || '', st.relation || ''].join('|');
+    const mk = (st, children = []) => ({ step: Object.assign(st, { key: keyOf(st) }), children });
+    const graft = (proof, excluded, underBase) => proofTree(proof, order).root.children.map(function tag(n) { if (n.step) { n.step.ok = true; if (excluded) n.step.excluded = true; if (underBase) n.step.underBase = true; } n.children.forEach(tag); return n; });
+    const build = (f, exclCtx) => {
+      const slot = `${f.object}#${f.relation}`, ok = f.result === true;
+      const node = mk({ kind: 'check', ok, excluded: !!(exclCtx && ok), object: f.object, relation: f.relation, user: f.user, to: slot, cycle: !!f.cycle, cached: !!f.cached, text: ok ? `${f.user} is ${f.relation} of ${f.object}` : `${f.user} is not ${f.relation} of ${f.object}`, why: f.reason || '' });
+      if (ok) { node.children = f.proof ? graft(f.proof, !!exclCtx) : []; return node; }
+      let pending = null, excl = false, started = !f.baseProof;
+      if (f.baseProof) node.children.push(mk({ kind: 'base', ok: true, object: f.object, relation: f.relation, to: slot, text: `the base of ${f.relation} holds for ${f.user}`, why: 'this part passed — the exclusion below is what denies it' }, graft(f.baseProof, false, true)));
+      for (const it of f.items) {
+        if (it.frame) {
+          if (!started) continue;
+          const child = build(it.frame, excl);
+          const cok = child.step.ok, cx = excl && cok;
+          if (pending && pending.kind === 'computed') node.children.push(mk({ kind: 'computed', ok: cok, excluded: cx, from: `${f.object}#${pending.implied}`, to: slot, object: f.object, relation: f.relation, implied: pending.implied, gid: pending.gid, text: `${f.relation} on ${f.object} ⇐ ${pending.implied}`, why: `anyone who is ${pending.implied} is also ${f.relation} — so check ${pending.implied}` }, [child]));
+          else if (pending && pending.kind === 'userset' && pending.tuple) { const t = pending.tuple; node.children.push(mk({ kind: 'tuple', userset: true, ok: cok, excluded: cx, tupleId: t.id, from: `${t.user.type}:${t.user.id}#${t.user.relation}`, fromObject: `${t.user.type}:${t.user.id}`, to: slot, object: f.object, relation: f.relation, text: `${t.user.raw} are ${f.relation} of ${f.object} — is ${f.user} in it?`, why: 'a tuple grants it to the whole userset; membership is checked next' }, [child])); }
+          else if (pending && pending.kind === 'ttu' && pending.tuple) { const t = pending.tuple, parent = t.user.raw; node.children.push(mk({ kind: 'ttu', ok: cok, excluded: cx, tupleId: t.id, from: `${parent}#${pending.computed}`, fromObject: parent, to: slot, object: f.object, relation: f.relation, tupleset: pending.tupleset, computed: pending.computed, parent, gid: pending.gid, text: `${f.relation} of ${f.object} ⇐ ${pending.computed} of its ${pending.tupleset}`, why: `"${f.relation}: ${pending.computed} from ${pending.tupleset}" — so check ${pending.computed} on ${parent}` }, [mk({ kind: 'tuple', ok: true, tupleId: t.id, from: subjOf(t.user), to: `${f.object}#${pending.tupleset}`, object: f.object, relation: pending.tupleset, text: `${parent} is ${pending.tupleset} of ${f.object}`, why: 'a tuple says so' }), child])); }
+          else node.children.push(child);
+          pending = null; continue;
+        }
+        const ev = it.event, m = ev.meta; if (!m) continue;
+        if (m.kind === 'exclusion') { excl = true; started = true; continue; }
+        if (!started) continue;
+        if (m.kind === 'computed') pending = m;
+        else if (m.kind === 'userset' || m.kind === 'ttu') pending = Object.assign({ tuple: store.byId(m.tupleId) }, m);
+        else if (m.kind === 'direct') { if (!excl) node.children.push(mk({ kind: 'direct', ok: false, object: f.object, relation: f.relation, user: f.user, to: slot, read: m.count, text: m.count ? `${m.count} ${f.relation} tuple${m.count === 1 ? '' : 's'} on ${f.object}, none for ${f.user}` : `no ${f.relation} tuple on ${f.object}`, why: `"${f.user} ${f.relation} ${f.object}" would satisfy this directly` })); }
+        else if (m.kind === 'ttuRead' && m.count === 0) node.children.push(mk({ kind: 'noparent', ok: false, object: f.object, relation: f.relation, tupleset: m.tupleset, computed: m.computed, to: `${f.object}#${m.tupleset}`, text: `${f.object} has no ${m.tupleset}`, why: `"${f.relation}: ${m.computed} from ${m.tupleset}" cannot apply without a ${m.tupleset} tuple` }));
+        else if (m.kind === 'match') { const t = store.byId(m.tupleId); if (t) node.children.push(mk({ kind: 'tuple', ok: true, excluded: excl, tupleId: t.id, from: subjOf(t.user), to: slot, object: f.object, relation: f.relation, text: excl ? `${t.user.raw} is ${f.relation} of ${f.object} — this is the exclusion` : `${t.user.raw} is ${f.relation} of ${f.object}`, why: excl ? 'this tuple matches the "but not" branch and denies the request' : 'a tuple says so' })); }
+      }
+      return node;
+    };
+    const tree = { step: null, children: [build(root, false)] };
+    // flatten (pre-order for check order, post-order for flow order)
+    const all = [];
+    const flat = (n) => { if (down) { if (n.step) all.push(n.step); n.children.forEach(flat); } else { const kids = n.children.slice(); if (n.step && n.step.kind === 'ttu') kids.reverse(); kids.forEach(flat); if (n.step) all.push(n.step); } };
+    flat(tree);
+    // nearest miss: the failing leaf deepest in the tree; its ancestors are the path
+    let best = null;
+    const walk = (n, anc) => {
+      const here = n.step ? anc.concat([n.step]) : anc;
+      const isMiss = n.step && (n.step.ok === false || n.step.excluded) && (!n.children.length || n.step.kind === 'tuple');
+      if (isMiss && (!best || here.length > best.length)) best = here;
+      n.children.forEach((c) => walk(c, here));
+    };
+    walk(tree, []);
+    const pathKeys = new Set((best || []).map((st) => st.key));
+    all.forEach((st) => { st.onPath = pathKeys.has(st.key); st.n = null; });
+    // the tuple a "from" step read belongs to the path too, and intermediate sub-checks are implied by
+    // the step that opened them (the root verdict and dead-end checks stay)
+    const mark = (n, depth) => {
+      if (n.step) {
+        n.step.leaf = !n.children.length; n.step.depth = depth;
+        if (n.step.onPath && n.step.kind === 'ttu' && n.children[0] && n.children[0].step) n.children[0].step.onPath = true;
+      }
+      n.children.forEach((c) => mark(c, depth + (n.step ? 1 : 0)));
+    };
+    mark(tree, 0);
+    // the walk = the nearest-miss path, plus the base that passed when an exclusion is what denies;
+    // only walk steps carry numbers, so the graph, matrix and list agree
+    const steps = all.filter((st) => (st.onPath && !(st.kind === 'check' && st.depth > 0 && !st.leaf)) || st.kind === 'base' || st.underBase);
+    steps.forEach((st, i) => { st.n = i + 1; });
+    // fixes: tuples that would flip the answer, verified by re-running the check
+    const fixes = [];
+    const user = parseUserRef(q.user);
+    const seen = new Set();
+    const tryStore = (tuples) => { try { return check(model, buildStore(tuples), { user: q.user, relation: q.relation, object: q.object, context: q.context || {} }).allowed; } catch (e) { return false; } };
+    const visit = (n, depth) => {
+      const st = n.step;
+      if (st && st.kind === 'direct' && !user.relation && !user.wildcard) {
+        const t = model.typeMap.get(st.object.split(':')[0]), r = t && t.relMap.get(st.relation);
+        if (r && r.directTypes.some((e) => e.type === user.type && !e.relation && !e.wildcard && !e.condition)) {
+          const text = `${q.user} ${st.relation} ${st.object}`;
+          if (!seen.has(text)) { seen.add(text); const t2 = { user, relation: st.relation, object: parseObjectRef(st.object), condition: null }; if (tryStore(store.tuples.concat([t2]))) fixes.push({ action: 'add', text, depth, object: st.object, relation: st.relation }); }
+        }
+      }
+      if (st && st.excluded && st.kind === 'tuple' && st.tupleId != null) {
+        const t = store.byId(st.tupleId);
+        if (t && !seen.has(`-${t.id}`)) { seen.add(`-${t.id}`); if (tryStore(store.tuples.filter((x) => x.id !== t.id))) fixes.push({ action: 'remove', text: `${t.user.raw} ${t.relation} ${t.object.raw}`, tupleId: t.id, line: t.line, depth, contextual: !!t.contextual }); }
+      }
+      n.children.forEach((c) => visit(c, depth + 1));
+    };
+    visit(tree, 0);
+    fixes.sort((a, b) => (a.action === b.action ? a.depth - b.depth : a.action === 'remove' ? -1 : 1));
+    return { root: tree, steps, all, path: best || [], fixes: fixes.slice(0, 8), excludedBy: root.excludedBy || null, reason: root.reason || '' };
+  }
   function chainText(chain) {
     const parts = [];
     chain.segments.forEach((sg, i) => {
@@ -1478,7 +1573,7 @@
     parseDSL, parseRewrite, describeRewrite, describeEntry, walkRewrite,
     modelToJSON, ulid, modelEdges, buildModelGraph, buildDataGraph,
     parseUserRef, parseObjectRef, parseTupleLine, parseTuples, validateTuple, tupleKey, formatTuple, arrowTuple,
-    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofTree, proofSteps, chainText,
+    buildStore, check, listObjects, listUsers, expand, expandTreeToJSON, summaryHighlight, proofChains, proofTree, proofSteps, explainDenial, chainText,
     evaluateCondition, CEL,
   };
 });

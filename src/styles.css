@@ -839,14 +839,17 @@ svg.proofing .edge:not(.hl) { opacity: 0.08; }
 svg.proofing .card.inst.hl .row:not(.hl) text { opacity: 0.4; }
 .proof-bar { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 4; display: flex; flex-direction: column; gap: 6px; padding: 7px 10px 8px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow); font-size: 12px; backdrop-filter: blur(6px); }
 .graph-stage:has(.minimap:not([hidden])) .proof-bar { right: 176px; }
-.proof-bar .pb-head { display: flex; align-items: center; gap: 10px; }
+.proof-bar .pb-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.proof-bar .pb-title { white-space: nowrap; }
+@media (max-width: 1400px) { .proof-bar .pb-hint { display: none; } }
 .proof-bar .pb-title { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg); display: inline-flex; align-items: center; gap: 8px; }
 .proof-bar .pb-title .pb-k { font-family: var(--font-body); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ok); font-weight: 600; }
 .proof-bar .pb-hint { color: var(--fg-3); font-size: 11px; }
 .proof-bar .pb-back { margin-left: auto; }
 .proof-bar .pb-close { flex: 0 0 auto; }
 .proof-bar .pb-head .pb-close:first-of-type:not(.pb-back) { margin-left: auto; }
-.proof-bar .pb-steps { display: flex; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+.proof-bar .pb-steps { display: flex; flex-wrap: nowrap; gap: 4px 6px; min-width: 0; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+.proof-bar .pb-step { flex: 0 0 auto; }
 .proof-bar .pb-step { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--fg); font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
 .proof-bar .pb-step:hover { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
 .proof-bar .pb-step b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10.5px; }
@@ -903,3 +906,44 @@ table.mx.mw td.mw.empty { color: var(--line-2); }
 .mx-walk .pb-title { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg); display: inline-flex; align-items: center; gap: 8px; }
 .mx-walk .pb-title .pb-k { font-family: var(--font-body); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ok); font-weight: 600; }
 .mx-walk .pb-hint { color: var(--fg-3); font-size: 11px; font-family: var(--font-body); }
+
+/* ── the proof component: numbered steps, same look everywhere */
+.btn.xs { padding: 1px 7px; min-height: 20px; font-size: 11px; border-radius: 6px; }
+ol.steps { margin: 6px 0 2px; padding: 0; list-style: none; }
+ol.steps li { display: flex; gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg); }
+ol.steps li b { flex: 0 0 auto; display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10px; align-self: center; }
+ol.steps li.k-computed b { background: var(--edge-computed); } ol.steps li.k-ttu b { background: var(--edge-ttu); } ol.steps li.k-and b, ol.steps li.k-not b, ol.steps li.k-base b { background: var(--fg-2); }
+ol.steps li.fail b { background: var(--bad); }
+ol.steps li.fail span { color: var(--bad); }
+ol.steps li em { font-style: normal; color: var(--fg-3); font-family: var(--font-body); font-size: 11px; }
+ol.steps.compact li { padding: 1px 0; }
+.proof ol.steps li { cursor: pointer; }
+.proof ol.steps li:hover { background: var(--surface-2); }
+.proof-hint { color: var(--fg-3); font-size: 11px; padding: 2px 6px 0; }
+.why-not { border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--line-2)); border-radius: 8px; padding: 6px 8px 8px; margin-top: 4px; }
+.why-not .wn-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-2); }
+.why-not .wn-head .pb-k { white-space: nowrap; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.why-not ol.steps li { cursor: pointer; } .why-not ol.steps li:hover { background: var(--surface-2); }
+.pb-k.no { color: var(--bad) !important; }
+.wn-fixes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; font-size: 12px; }
+.wn-fixes .lbl { color: var(--fg-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.wn-fixes .sub { color: var(--fg-3); font-size: 11.5px; }
+.fix { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px 2px 4px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); }
+.fix b { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 12px; color: #fff; }
+.fix.add b { background: var(--ok); } .fix.remove b { background: var(--bad); }
+.fix code { font-size: 11.5px; }
+.badge.fail circle { fill: var(--bad); }
+.proof-bar .pb-step.fail b, .mw-chip.fail b, .pt-row b.n.fail { background: var(--bad); }
+.proof-bar .pb-step.fail, .mw-chip.fail { border-color: color-mix(in srgb, var(--bad) 50%, var(--line-2)); }
+.pt-row.off { opacity: 0.55; }
+.pt-row.off b.n { background: var(--line-2); color: var(--fg-2); font-size: 9px; }
+.pt-row.off.fail b.n { background: color-mix(in srgb, var(--bad) 35%, var(--line-2)); color: #fff; }
+.pt-row.fail .t { color: var(--bad); }
+.mx-walk.denial { border-color: color-mix(in srgb, var(--bad) 40%, var(--line-2)); }
+
+/* ── view buttons named by the question they answer */
+#graph-mode button { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; padding: 3px 10px; }
+#graph-mode button small { font-size: 10px; font-weight: 400; color: var(--fg-3); white-space: nowrap; }
+#graph-mode button[aria-pressed="true"] small { color: var(--fg-2); }
+#graph-hint { display: none; }
+@media (max-width: 1100px) { #graph-mode button small { display: none; } }

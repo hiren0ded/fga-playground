@@ -118,10 +118,10 @@
     <section class="pane pane-graph" id="pane-graph" aria-label="Graph">
       <div class="graph-toolbar">
         <div class="seg" id="graph-mode">
-          <button data-mode="schema" aria-pressed="true">Schema</button>
-          <button data-mode="model" aria-pressed="false" title="How one relation is computed, as the tree Check walks">Resolution</button>
-          <button data-mode="data" aria-pressed="false">Data</button>
-          <button data-mode="matrix" aria-pressed="false" title="Access matrix: who holds which relation on which object, direct or derived">Matrix</button>
+          <button data-mode="schema" aria-pressed="true" title="Schema: one card per type with its relations; only cross-type links are edges">Schema<small>what shape is the model?</small></button>
+          <button data-mode="model" aria-pressed="false" title="Resolution: one relation drawn as the tree Check walks — the trace lights up its branches">Resolution<small>how does a relation compute?</small></button>
+          <button data-mode="data" aria-pressed="false" title="Data: tuples as edges into object#relation slots; objects the query walked open as cards">Data<small>what is in the store?</small></button>
+          <button data-mode="matrix" aria-pressed="false" title="Matrix: who holds which relation on which object — direct, derived, public or excluded; click a cell for the proof or the reason it is denied">Matrix<small>who can do what?</small></button>
         </div>
         <button class="btn sm toggle" id="btn-subjects" aria-pressed="false" hidden>subjects</button>
         <button class="btn sm toggle" id="btn-connect" aria-pressed="false" title="Connect mode: drag from one node to another to write a tuple (or hold Alt while dragging)" hidden>⟋ connect</button>

@@ -39,8 +39,12 @@ wildcard/exclusion set algebra for ListUsers).
     preview its walk, click to pin it; Esc clears.
   - Everywhere: focus mode, multi-select with paths between nodes, layouts (dagre, lanes, force,
     radial), find, minimap, drag/pin, SVG/PNG export.
-- **Query lab** – Check / ListObjects / ListUsers / Expand with a one-line proof for ALLOWED,
-  a step-by-step resolution trace, contextual tuples and condition context.
+- **Query lab** – Check / ListObjects / ListUsers / Expand with a numbered proof for ALLOWED
+  and a **why not** for DENIED: the branch that got furthest with the step it stopped at, or the
+  "but not" that took the access away, plus the tuples that would flip the answer (verified by
+  re-running the check) with one-click *try* (as a contextual tuple) or *write*. The same numbered
+  steps appear on the data graph, in the matrix and in tooltips. Step-by-step resolution trace,
+  contextual tuples and condition context.
 - **Store inspector** – tuples (Read filter), models, types, model JSON, changes, and the
   equivalent HTTP API calls and `fga` CLI session, plus a `store.fga.yaml` test file.
 - **Assertions** and nine example stores (Drive, GitHub, Slack, expenses, entitlements,
