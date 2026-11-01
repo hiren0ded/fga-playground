@@ -976,3 +976,9 @@ details.pt-more > summary::-webkit-details-marker { display: none; }
 details.pt-more > summary::before { content: '▸ '; }
 details.pt-more[open] > summary::before { content: '▾ '; }
 details.pt-more > summary:hover { color: var(--fg); }
+
+/* brand: links to the static site */
+.brand-name a.brand-home { color: inherit; text-decoration: none; }
+.brand-name .brand-pg { font-weight: 500; color: var(--fg-3); }
+.brand-sub a { color: var(--fg-2); text-decoration: none; }
+.brand-sub a:hover { color: var(--fg); text-decoration: underline; }

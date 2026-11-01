@@ -71,7 +71,21 @@ ${body}</body>
       const chunks = [];
       for (let i = 0; i < marks.length - 1; i++) chunks.push(body.slice(marks[i], marks[i + 1]));
       const strict = (code) => "'use strict';\n" + code;
+      // self-hosted fonts (no font CDN) — @fontsource latin subsets, content-hashed
+      fs.mkdirSync(path.join(out, 'assets', 'fonts'), { recursive: true });
+      const FONTS = [['Bricolage Grotesque', 'bricolage-grotesque', [500, 700]], ['IBM Plex Sans', 'ibm-plex-sans', [400, 500, 600]], ['JetBrains Mono', 'jetbrains-mono', [400, 500, 600]]];
+      let fontsCss = '';
+      for (const [family, pkg, weights] of FONTS) for (const w of weights) {
+        const buf = fs.readFileSync(path.join(__dirname, 'node_modules/@fontsource', pkg, 'files', `${pkg}-latin-${w}-normal.woff2`));
+        const name = `assets/fonts/${pkg}-${w}.${h8(buf)}.woff2`;
+        fs.writeFileSync(path.join(out, name), buf);
+        fontsCss += `@font-face{font-family:'${family}';font-style:normal;font-display:swap;font-weight:${w};src:url(/${name}) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2190-2199,U+2191-21FF,U+2200-22FF,U+2300-23FF,U+25A0-25FF,U+2600-26FF,U+2700-27BF,U+FEFF,U+FFFD}\n`;
+      }
+      const cssOut = (code) => csso.minify(code).css.replace(/\}(?=[^\s}])/g, '}\n').replace(/[^\x00-\x7f]/gu, (c) => '\\' + c.codePointAt(0).toString(16) + ' ') + '\n';
       const files = {
+        'd3.js': fs.readFileSync(path.join(__dirname, 'node_modules/d3/dist/d3.min.js'), 'utf8'),
+        'dagre.js': fs.readFileSync(path.join(__dirname, 'node_modules/dagre/dist/dagre.min.js'), 'utf8'),
+        'site.css': cssOut(fontsCss + src('site/site.css')),
         'engine.js': await js(src('engine.js')),
         'examples.js': await js(src('examples.js')),
         'app-1.js': await js(strict(chunks[0])),
@@ -80,7 +94,7 @@ ${body}</body>
         'app-3.js': await js(strict(chunks[2])),
         'app-4.js': await js(strict(chunks[3].replace('/*__SHARE__*/', ''))),
         'app-5.js': await js(strict(src('app-share.js'))),
-        'styles.css': csso.minify(src('styles.css')).css.replace(/\}(?=[^\s}])/g, '}\n').replace(/[^\x00-\x7f]/gu, (c) => '\\' + c.codePointAt(0).toString(16) + ' ') + '\n'
+        'styles.css': cssOut(fontsCss + src('styles.css'))
       };
       const named = {};
       for (const [k, v] of Object.entries(files)) {
@@ -99,17 +113,16 @@ ${body}</body>
     srcs.forEach(function (s) { var sc = document.createElement('script'); sc.src = s; sc.async = false; sc.onload = function () { if (!--left) done(); }; sc.onerror = function () { onerr(s); }; document.head.appendChild(sc); });
   }
   function start() { load(app, function () {}, function (s) { fail('Failed to load ' + s + '. Reload the page.'); }); }
-  var need = [
-    { ok: function () { return typeof d3 !== 'undefined'; }, src: 'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js' },
-    { ok: function () { return typeof dagre !== 'undefined'; }, src: 'https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js' }
-  ].filter(function (l) { return !l.ok(); });
-  if (!need.length) return start();
-  var msg = 'The graph libraries (d3, dagre) could not be loaded from the CDN. Check your network and reload the page.';
-  load(need.map(function (l) { return l.src; }), function () { if (typeof d3 !== 'undefined' && typeof dagre !== 'undefined') start(); else fail(msg); }, function () { fail(msg); });
+  if (typeof d3 !== 'undefined' && typeof dagre !== 'undefined') return start();
+  fail('The graph libraries (d3, dagre) could not be loaded. Check your network and reload the page.');
 })();
 </script>`;
       let doc = page
         .replace('<meta name="claude:viewport-fit-sides" content="cover">\n', '')
+        .replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>\n?/, '')
+        .replace('<title>OpenFGA Visual Playground</title>', '<title>Playground — FGA Explorer</title>')
+        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/d3@[^"]+"><\/script>/, () => `<script src="/${named['d3.js']}"></script>`)
+        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/dagre@[^"]+"><\/script>/, () => `<script src="/${named['dagre.js']}"></script>`)
         .replace(/<style>\n\/\*__STYLES__\*\/\n<\/style>/, `<link rel="stylesheet" href="/${named['styles.css']}">`)
         .replace(/<script>\n\/\*__ENGINE__\*\/\n<\/script>\n<script>\n\/\*__EXAMPLES__\*\/\n<\/script>\n<script>[\s\S]*<\/script>/,
           () => `<script src="/${named['engine.js']}"></script>\n<script src="/${named['examples.js']}"></script>\n${bootScript}`);
@@ -121,9 +134,9 @@ ${body}</body>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="Write an OpenFGA authorization model, add relationship tuples, and watch Check, ListObjects, ListUsers and Expand resolve step by step on a live graph.">
-<meta property="og:title" content="OpenFGA Visual Playground">
-<meta property="og:description" content="Model, tuples, and a step-by-step resolver on a live authorization graph.">
+<meta name="description" content="FGA Explorer playground (unofficial): write an OpenFGA-style authorization model, add relationship tuples, and watch Check, ListObjects, ListUsers and Expand resolve step by step.">
+<meta property="og:title" content="FGA Explorer — Playground">
+<meta property="og:description" content="An unofficial learning playground: model, tuples, and a step-by-step resolver on a live authorization graph.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,${favicon}">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}</style>
@@ -132,9 +145,21 @@ ${hd}</head>
 ${bd}</body>
 </html>
 `;
-      fs.writeFileSync(path.join(out, 'index.html'), html.replace(/[ \t]*<!--[\s\S]*?-->\n?/g, '').replace(/[^\x00-\x7f]/gu, (c) => '&#x' + c.codePointAt(0).toString(16) + ';'));
+      const ascii = (h) => h.replace(/[ \t]*<!--[\s\S]*?-->\n?/g, '').replace(/[^\x00-\x7f]/gu, (c) => '&#x' + c.codePointAt(0).toString(16) + ';');
+      fs.writeFileSync(path.join(out, 'playground.html'), ascii(html));
+      // static pages: home, learning, legal — shared nav/footer partials
+      const nav = src('site/_nav.html'), footer = src('site/_footer.html');
+      const pages = { 'index.html': 'index.html', 'learning.html': 'learning.html', 'legal.html': 'legal.html' };
+      for (const [from, to] of Object.entries(pages)) {
+        let p = src('site/' + from)
+          .replace(/\{\{NAV:(\w+)\}\}/, (m, cur) => nav.replace(/\{\{CUR:(\w+)\}\}/g, (mm, k) => (k === cur ? ' aria-current="page"' : '')))
+          .replace('{{FOOTER}}', footer)
+          .replace(/\{\{SITE_CSS\}\}/g, '/' + named['site.css'])
+          .replace(/\{\{FAVICON\}\}/g, 'data:image/svg+xml,' + favicon);
+        fs.writeFileSync(path.join(out, to), ascii(p));
+      }
       const manifest = {};
-      for (const f of ['index.html', ...Object.values(named)]) {
+      for (const f of ['playground.html', ...Object.keys(pages), ...Object.values(named)]) {
         const buf = fs.readFileSync(path.join(out, f));
         manifest[f] = { sha: crypto.createHash('sha1').update(buf).digest('hex'), size: buf.length };
       }

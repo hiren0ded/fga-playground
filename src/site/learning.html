@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Learn — FGA Explorer</title>
+<meta name="description" content="Fine-grained, relationship-based authorization explained: why it exists, and OpenFGA's core ideas — stores, models, tuples, usersets, rewrites, conditions and the query APIs — with a worked example.">
+<link rel="icon" href="{{FAVICON}}">
+<link rel="stylesheet" href="{{SITE_CSS}}">
+</head>
+<body>
+{{NAV:learning}}
+<header class="page-hero">
+  <div class="wrap">
+    <p class="eyebrow">// learning</p>
+    <h1>OpenFGA™, from the ground up</h1>
+    <p>Why relationship-based authorization exists, the handful of ideas it is built from, and how a check is actually answered — each with a link to try it in the playground.</p>
+  </div>
+</header>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page">
+    <div class="t">On this page</div>
+    <a href="#why">Why fine-grained authz</a>
+    <a href="#what">What OpenFGA is</a>
+    <a href="#concepts">Core concepts</a>
+    <a href="#model">Writing a model</a>
+    <a href="#rewrites">Relation rewrites</a>
+    <a href="#conditions">Conditions &amp; context</a>
+    <a href="#apis">Asking questions</a>
+    <a href="#check">How a check resolves</a>
+    <a href="#example">Worked example</a>
+    <a href="#tips">Modeling tips</a>
+    <a href="#more">Go further</a>
+  </nav>
+  <article class="prose">
+
+    <h2 id="why">Why fine-grained authorization?</h2>
+    <p>Most apps start with <b>roles</b>: admins can do everything, editors can edit, viewers can view. That breaks down as soon as the answer depends on <i>which</i> thing you are asking about: “can Anne edit <i>this</i> document?” depends on who owns it, which folder it sits in, which team shares that folder, and whether Anne is in that team.</p>
+    <p><b>Relationship-based access control (ReBAC)</b> models permissions as a graph of relationships between users and objects — <code>anne</code> is a member of <code>engineering</code>, <code>engineering</code> can view <code>product</code>, <code>product</code> is the parent of <code>roadmap</code> — and answers “can X do Y on Z?” by finding a path through that graph. Roles still fit (a role is just a relation), but so do ownership, sharing, hierarchy and groups of groups.</p>
+    <div class="callout">The approach comes from Google’s <b>Zanzibar</b> paper (USENIX ATC 2019), which describes the system behind permissions in Drive, YouTube and other Google products.</div>
+
+    <h2 id="what">What OpenFGA is</h2>
+    <p><b>OpenFGA</b> is an open-source, Zanzibar-inspired authorization engine. It was started at Auth0 / Okta and is a <a href="https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/" rel="noopener">Cloud Native Computing Foundation incubating project</a>. You run it as a service: your application writes relationships into it and asks it questions, instead of hard-coding permission logic.</p>
+    <ul>
+      <li><b>Centralised</b> — one place answers “who can do what” for every service.</li>
+      <li><b>Expressive</b> — a small modeling language covers roles, ownership, sharing, hierarchies, groups and conditions.</li>
+      <li><b>Answerable both ways</b> — not just “can she?”, but “what can she access?” and “who can access this?”.</li>
+    </ul>
+    <p class="notice">This page is an independent explanation for learning. For the authoritative reference, see the <a href="https://openfga.dev/docs" rel="noopener">official OpenFGA documentation</a>.</p>
+
+    <h2 id="concepts">Core concepts</h2>
+    <div class="concepts">
+      <div class="card"><h3>Store</h3><p>An isolated container holding one set of authorization models and relationship tuples — typically one per environment or tenant.</p></div>
+      <div class="card"><h3>Authorization model</h3><p>The schema: which <b>types</b> exist and how their <b>relations</b> are defined. Models are <b>immutable</b>; every write creates a new version with its own ID.</p></div>
+      <div class="card"><h3>Type &amp; object</h3><p>A type is a kind of thing (<code>doc</code>, <code>folder</code>); an object is one instance, written <code>type:id</code> — <code>doc:roadmap</code>.</p></div>
+      <div class="card"><h3>User (subject)</h3><p>Who a tuple is about: an object like <code>user:anne</code>, everyone of a type <code>user:*</code>, or a <b>userset</b> like <code>group:eng#member</code>.</p></div>
+      <div class="card"><h3>Relation</h3><p>A named relationship a type defines — <code>owner</code>, <code>parent</code>, <code>viewer</code> — either assigned directly or computed from others.</p></div>
+      <div class="card"><h3>Relationship tuple</h3><p>One fact in the store: <code>user · relation · object</code>, e.g. <code>user:anne owner doc:roadmap</code>, optionally with a condition.</p></div>
+      <div class="card"><h3>Userset</h3><p><code>object#relation</code> — “everyone who has <i>relation</i> on <i>object</i>”. Granting to <code>group:eng#member</code> grants to all members, present and future.</p></div>
+      <div class="card"><h3>Check</h3><p>The core question: is <i>user</i> related to <i>object</i> by <i>relation</i>? Answered by walking tuples according to the model.</p></div>
+    </div>
+    <a class="try" href="/playground?example=drive&amp;view=schema">See these in the Schema view →</a>
+
+    <h2 id="model">Writing a model</h2>
+    <p>Models are written in a small DSL. Each <code>type</code> lists its relations; each <code>define</code> says how that relation can be satisfied.</p>
+<pre class="code"><span class="k">model</span>
+  <span class="k">schema</span> 1.1
+
+<span class="k">type</span> <span class="t">user</span>
+
+<span class="k">type</span> <span class="t">group</span>
+  <span class="k">relations</span>
+    <span class="k">define</span> <span class="r">member</span>: [user, group#member]   <span class="c"># people, or members of another group</span>
+
+<span class="k">type</span> <span class="t">folder</span>
+  <span class="k">relations</span>
+    <span class="k">define</span> <span class="r">owner</span>: [user]
+    <span class="k">define</span> <span class="r">parent</span>: [folder]
+    <span class="k">define</span> <span class="r">viewer</span>: [user, user:*, group#member] or owner or viewer from parent
+
+<span class="k">type</span> <span class="t">doc</span>
+  <span class="k">relations</span>
+    <span class="k">define</span> <span class="r">parent</span>: [folder]
+    <span class="k">define</span> <span class="r">owner</span>: [user]
+    <span class="k">define</span> <span class="r">editor</span>: [user, group#member] or owner
+    <span class="k">define</span> <span class="r">viewer</span>: [user, user:*, group#member] or editor or viewer from parent
+    <span class="k">define</span> <span class="r">blocked</span>: [user]
+    <span class="k">define</span> <span class="r">can_comment</span>: viewer but not blocked</pre>
+    <p>The brackets list the <b>type restrictions</b>: which kinds of subject a tuple may assign directly. Everything after them describes how the relation is <b>derived</b>.</p>
+
+    <h2 id="rewrites">Relation rewrites</h2>
+    <table class="tbl">
+      <thead><tr><th>Form</th><th>Reads as</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td><b>Direct</b></td><td>a tuple assigns it</td><td><code>define owner: [user]</code></td></tr>
+        <tr><td><b>Wildcard</b></td><td>every object of that type</td><td><code>[user:*]</code> → public</td></tr>
+        <tr><td><b>Userset</b></td><td>everyone holding a relation on another object</td><td><code>[group#member]</code></td></tr>
+        <tr><td><b>Computed</b></td><td>implied by another relation on the same object</td><td><code>editor: … or owner</code> — owners are editors</td></tr>
+        <tr><td><b>Tuple-to-userset</b></td><td>a relation on a related object</td><td><code>viewer from parent</code> — viewers of the parent folder</td></tr>
+        <tr><td><b>Union</b></td><td>any of</td><td><code>a or b</code></td></tr>
+        <tr><td><b>Intersection</b></td><td>all of</td><td><code>a and b</code></td></tr>
+        <tr><td><b>Exclusion</b></td><td>the base, except</td><td><code>viewer but not blocked</code></td></tr>
+      </tbody>
+    </table>
+    <a class="try" href="/playground?example=drive&amp;view=model">Watch a rewrite tree resolve →</a>
+
+    <h2 id="conditions">Conditions &amp; context</h2>
+    <p><b>Conditions</b> attach a rule to a tuple, written in CEL and evaluated at check time with values from the tuple and the request:</p>
+<pre class="code"><span class="k">type</span> <span class="t">doc</span>
+  <span class="k">relations</span>
+    <span class="k">define</span> <span class="r">viewer</span>: [user with non_expired_grant]
+
+<span class="k">condition</span> non_expired_grant(current_time: timestamp, grant_time: timestamp, grant_duration: duration) {
+  current_time &lt; grant_time + grant_duration
+}</pre>
+    <p><b>Contextual tuples</b> are tuples sent with a single request and never stored — useful for facts your app already knows at request time (the user’s current IP range, a session attribute, a group from a token).</p>
+    <a class="try" href="/playground?example=conditions">Try the conditions example →</a>
+
+    <h2 id="apis">Asking questions</h2>
+    <table class="tbl">
+      <thead><tr><th>API</th><th>Question</th></tr></thead>
+      <tbody>
+        <tr><td><b>Check</b></td><td>Can <code>user:bob</code> <code>view</code> <code>doc:roadmap</code>? → allowed / denied</td></tr>
+        <tr><td><b>ListObjects</b></td><td>Which <code>doc</code>s can <code>user:bob</code> view?</td></tr>
+        <tr><td><b>ListUsers</b></td><td>Which <code>user</code>s can view <code>doc:roadmap</code>?</td></tr>
+        <tr><td><b>Expand</b></td><td>What is the userset tree behind <code>doc:roadmap#viewer</code>?</td></tr>
+        <tr><td><b>Write / Read</b></td><td>Add or remove tuples; read tuples matching a filter.</td></tr>
+        <tr><td><b>ReadChanges</b></td><td>What tuples changed, in order — for syncing and auditing.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="check">How a check resolves</h2>
+    <p>To answer “is <code>user:bob</code> a <code>viewer</code> of <code>doc:roadmap</code>?”, the resolver starts at the userset <code>doc:roadmap#viewer</code> and works <b>down</b> the definition until it reaches bob — or runs out of paths:</p>
+    <ol class="num">
+      <li><span><code>viewer</code> is a union, so try each branch. Direct tuples? Only <code>user:dave</code>. Editors? None that include bob. Then <b>viewer from parent</b>.</span></li>
+      <li><span>Read <code>doc:roadmap</code>’s <code>parent</code> tuples: <code>folder:product</code>.</span></li>
+      <li><span>Check <code>viewer</code> on <code>folder:product</code>: a tuple grants it to <code>group:engineering#member</code>.</span></li>
+      <li><span>Is bob in that userset? <code>user:bob member group:engineering</code> — <b>allowed</b>.</span></li>
+    </ol>
+    <p>Unions stop at the first branch that holds; intersections stop at the first that fails; exclusions check the base first, then make sure the subject is not in the excluded part.</p>
+    <a class="try" href="/playground?example=drive&amp;view=data">Step through this check →</a>
+
+    <h2 id="example">Worked example: a shared drive</h2>
+    <p>With the model above and these tuples:</p>
+<pre class="code">user:anne member group:engineering
+user:bob member group:engineering
+group:engineering#member viewer folder:product
+folder:product parent doc:roadmap
+user:anne owner doc:roadmap
+user:dave viewer doc:roadmap
+user:dave blocked doc:roadmap
+user:* viewer doc:handbook</pre>
+    <table class="tbl">
+      <thead><tr><th>Question</th><th>Answer</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>anne <code>editor</code> roadmap?</td><td style="color:var(--ok)">yes</td><td>owner ⇒ editor</td></tr>
+        <tr><td>bob <code>viewer</code> roadmap?</td><td style="color:var(--ok)">yes</td><td>member of engineering ⇒ viewer of product ⇒ viewer from parent</td></tr>
+        <tr><td>dave <code>can_comment</code> roadmap?</td><td style="color:var(--bad)">no</td><td>he is a viewer, but <code>but not blocked</code> removes it</td></tr>
+        <tr><td>anyone <code>viewer</code> handbook?</td><td style="color:var(--ok)">yes</td><td>the wildcard <code>user:*</code> makes it public</td></tr>
+      </tbody>
+    </table>
+    <a class="try" href="/playground?example=drive&amp;view=matrix">See all of it at once in the Matrix →</a>
+
+    <h2 id="tips">Modeling tips</h2>
+    <ul>
+      <li><b>Start from the questions</b> your app must ask (“can she comment?”), then define the relations that answer them.</li>
+      <li><b>Separate assignable from derived.</b> Keep tuples on a few base relations (<code>owner</code>, <code>member</code>, <code>parent</code>) and compute the permissions (<code>can_edit</code>, <code>can_view</code>) from them.</li>
+      <li><b>Grant to usersets, not individuals</b> — <code>team#member</code> keeps tuples few and changes cheap.</li>
+      <li><b>Use hierarchy</b> (<code>… from parent</code>) instead of copying access down to every child.</li>
+      <li><b>Watch intersections and exclusions</b>: they are powerful but make “why not?” harder; test them.</li>
+      <li><b>Test with assertions</b> and write a new model version for every change — versions are immutable, so you can always compare.</li>
+    </ul>
+
+    <h2 id="more">Go further</h2>
+    <ul>
+      <li><a href="https://openfga.dev/docs" rel="noopener">OpenFGA documentation</a> — concepts, modeling guides, API reference (official).</li>
+      <li><a href="https://openfga.dev/docs/modeling" rel="noopener">Modeling guides</a> — roles, parent-child, groups, conditions (official).</li>
+      <li><a href="https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/" rel="noopener">Zanzibar: Google’s Consistent, Global Authorization System</a> — the paper.</li>
+      <li><a href="/playground">The playground</a> — nine example stores to explore here.</li>
+    </ul>
+  </article>
+</div>
+{{FOOTER}}
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var heads = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  if (!('IntersectionObserver' in window)) return;
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { links.forEach(function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id); }); } });
+  }, { rootMargin: '-80px 0px -70% 0px' });
+  heads.forEach(function (h) { if (h) io.observe(h); });
+})();
+</script>
+</body>
+</html>

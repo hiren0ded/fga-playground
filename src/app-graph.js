@@ -1372,6 +1372,17 @@
       else { renderProofBar(); applyVisual(); }
       if (!opts.auto && mode === 'data') setTimeout(() => fitToHighlighted(true), 30);
     }
+    // back to the plain graph: no proof walk, focus, query highlight, opened cards or isolation
+    function resetView() {
+      proofLock = false; svg.node().classList.remove('locked');
+      proofWalk = null; proofPreview = null; proofObjects = new Set();
+      focus = null; hoverHl = null; currentHl = null; lastOpts = {};
+      cardOverride.clear();
+      gBadges.selectAll('*').remove();
+      emit('reset');
+      render(true);
+      fit(true);
+    }
     function setProofOnly(on) {
       if (!proofWalk || proofWalk.only === !!on) return;
       proofWalk.only = !!on;
@@ -1393,7 +1404,7 @@
       const walk = mode === 'data' ? proofWalk : null;
       pbar.hidden = !walk;
       if (!walk) return;
-      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k${walk.denial ? ' no' : ''}">${walk.denial ? 'why not' : 'proof'}</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><span class="seg xs pb-only" title="Only the path: lay out just the nodes, slots and edges this proof uses. Whole graph: keep everything, dimmed"><button data-only="1" aria-pressed="${!!walk.only}">only the path</button><button data-only="0" aria-pressed="${!walk.only}">whole graph</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span><button class="btn sm ghost" id="pb-md" title="Copy this explanation as markdown">copy md</button>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm ghost icon pb-close" id="pb-close" title="Clear the proof walk (Esc)">×</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}${st.ok === false || st.excluded ? ' fail' : ''}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
+      pbar.innerHTML = `<div class="pb-head"><span class="pb-title"><span class="pb-k${walk.denial ? ' no' : ''}">${walk.denial ? 'why not' : 'proof'}</span>${walk.title ? esc(walk.title) : ''}</span><span class="seg xs pb-order" title="Numbering: as Check resolves (from the queried object down to the subject) or as access flows (from the subject up to the goal)"><button data-o="check" aria-pressed="${proofOrder === 'check'}">Check order ↓</button><button data-o="flow" aria-pressed="${proofOrder === 'flow'}">access flow ↑</button></span><span class="seg xs pb-only" title="Only the path: lay out just the nodes, slots and edges this proof uses. Whole graph: keep everything, dimmed"><button data-only="1" aria-pressed="${!!walk.only}">only the path</button><button data-only="0" aria-pressed="${!walk.only}">whole graph</button></span><button class="btn sm toggle pb-lock" id="pb-lock" aria-pressed="${proofLock}" title="${proofLock ? 'Locked: clicks on the graph cannot change the selection or clear this walk. Click to unlock.' : 'Lock this walk so clicks on the graph cannot disturb it'}">${proofLock ? '🔒 locked' : '🔓 unlocked'}</button><span class="pb-hint">hover a step to flash it · click to go there</span><button class="btn sm ghost" id="pb-md" title="Copy this explanation as markdown">copy md</button>${walk.back ? `<button class="btn sm pb-back" id="pb-back">← back to ${esc(walk.back)}</button>` : ''}<button class="btn sm pb-close" id="pb-close" title="Leave the proof and show the whole graph again (Esc)">✕ show whole graph</button></div><div class="pb-steps">${walk.steps.map((st, i) => `<button class="pb-step k-${st.kind}${st.ok === false || st.excluded ? ' fail' : ''}" data-i="${i}" title="${esc(st.text)} — ${esc(st.why || '')}"><b>${st.n}</b>${esc(stepShort(st))}</button>`).join('')}</div>`;
       $$('.pb-step', pbar).forEach((b) => {
         const st = walk.steps[+b.dataset.i];
         b.addEventListener('mouseenter', () => flashStep(st));
@@ -1404,7 +1415,7 @@
       $('#pb-lock').addEventListener('click', () => { proofLock = !proofLock; svg.node().classList.toggle('locked', proofLock); renderProofBar(); });
       const back = $('#pb-back'); if (back) back.addEventListener('click', () => emit('proofBack', walk.back));
       $('#pb-md').addEventListener('click', () => emit('proofCopy', walk.title));
-      $('#pb-close').addEventListener('click', () => clearProof({ force: true }));
+      $('#pb-close').addEventListener('click', () => resetView());
     }
     function setProofOrder(o) {
       if (o !== 'check' && o !== 'flow') return;
@@ -1604,7 +1615,7 @@
     return {
       setData, setMode, setLayout, setSubjects, setPins, setCollapsed, resetLayout, setInsets, setConnectMode, toggleMinimap,
       setResolutionRoot, setQueryRelation, get resolutionRoot() { return treeRoot; }, get resolutionKey() { return resolutionKey(); },
-      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
+      setCardsMode, setPathObjects, toggleCard, setDerived, showProof, clearProof, resetView, setProofOrder, setProofOnly, flashStep, panToStep: (st) => { const p = stepAnchor(st); if (p) panToPoint(p.x, p.y); flashStep(st); }, get proofActive() { return !!proofWalk; }, get proofLocked() { return locked(); }, get proofOrder() { return proofOrder; }, get cardsMode() { return cardsMode; }, isCard: (id) => !!(curL && curL.nodes.some((n) => n.id === id && n.kind === 'inst')),
       fit, fitToHighlighted, panTo, zoomBy, highlight, flash, clearFocus,
       focusNode: (id) => { const n = curL && curL.nodes.find((x) => x.id === id); if (n) setFocus(id, n, null); },
       candidates, jumpTo, pathsBetween, svgMarkup, pngBlob, _layout: () => curL,

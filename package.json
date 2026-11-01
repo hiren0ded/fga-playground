@@ -11,11 +11,14 @@
   "author": "Hiren",
   "license": "MIT",
   "devDependencies": {
+    "@fontsource/bricolage-grotesque": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "csso": "^5.0.5",
     "csso-cli": "^4.0.2",
-    "terser": "^5.51.2",
     "d3": "^7.9.0",
-    "dagre": "^0.8.5"
+    "dagre": "^0.8.5",
+    "terser": "^5.51.2"
   },
   "private": true
 }

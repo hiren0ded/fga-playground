@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Disclaimer &amp; privacy — FGA Explorer</title>
+<meta name="description" content="FGA Explorer is an unofficial learning project: affiliation, trademarks, accuracy, privacy and third parties.">
+<link rel="icon" href="{{FAVICON}}">
+<link rel="stylesheet" href="{{SITE_CSS}}">
+</head>
+<body>
+{{NAV:legal}}
+<header class="page-hero">
+  <div class="wrap">
+    <p class="eyebrow">// legal</p>
+    <h1>Disclaimer &amp; privacy</h1>
+    <p>The short version: this is an independent learning tool, it is not OpenFGA, its answers can differ from a real server, and it keeps your data in your own browser.</p>
+  </div>
+</header>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page">
+    <div class="t">On this page</div>
+    <a href="#unofficial">Not affiliated</a>
+    <a href="#trademarks">Trademarks</a>
+    <a href="#accuracy">Accuracy &amp; no warranty</a>
+    <a href="#privacy">Privacy</a>
+    <a href="#sharing">Share links</a>
+    <a href="#third">Third parties</a>
+    <a href="#content">Content &amp; licences</a>
+    <a href="#contact">Contact &amp; changes</a>
+  </nav>
+  <article class="prose">
+    <p class="notice"><b>Last updated:</b> 1 November 2026</p>
+
+    <h2 id="unofficial">An unofficial learning project</h2>
+    <p>FGA Explorer (this website, including the playground) is an independent, personal project made for learning and teaching. It is <b>not</b> affiliated with, sponsored by, endorsed by or supported by the OpenFGA project or its maintainers, the Cloud Native Computing Foundation (CNCF), The Linux Foundation, Okta or Auth0. It is not an official OpenFGA product, demo or service.</p>
+    <p>For anything authoritative — documentation, releases, security advisories, support — go to <a href="https://openfga.dev" rel="noopener">openfga.dev</a>.</p>
+
+    <h2 id="trademarks">Trademarks</h2>
+    <p><b>OpenFGA™</b> is a trademark of The Linux Foundation. Cloud Native Computing Foundation and CNCF are trademarks of The Linux Foundation. Google Drive, GitHub, Slack and other product names mentioned in examples are trademarks of their respective owners.</p>
+    <p>These names are used only to refer, accurately, to the software this tool helps you learn about and to the real-world situations its examples imitate. Their use does not imply any relationship with, or endorsement by, their owners. This site does not use any project logo, and its own name and domain do not contain the OpenFGA mark.</p>
+
+    <h2 id="accuracy">Accuracy &amp; no warranty</h2>
+    <ul>
+      <li>The playground does <b>not</b> run OpenFGA. Its resolver is an independent re-implementation in JavaScript of the publicly documented modeling language and query semantics, written for teaching.</li>
+      <li>Its answers, traces, “why not” explanations, suggested fixes and lint findings <b>may differ</b> from a real OpenFGA server, especially in edge cases, limits, condition evaluation and newer features.</li>
+      <li><b>Do not</b> use it to make, verify or audit real authorization decisions. Test models against an actual OpenFGA server before relying on them.</li>
+      <li>The site and its content are provided <b>“as is”, without warranty of any kind</b>, express or implied, including fitness for a particular purpose. To the extent permitted by law, the author is not liable for any loss arising from its use.</li>
+    </ul>
+
+    <h2 id="privacy">Privacy</h2>
+    <ul>
+      <li><b>No accounts, no cookies, no analytics, no tracking.</b> The site sets no cookies and includes no analytics or advertising scripts.</li>
+      <li><b>Your data stays in your browser.</b> Models, tuples, assertions and settings you create are processed locally and saved in your browser’s local storage on your device. They are not sent to the site or to anyone else.</li>
+      <li><b>Deleting it:</b> use “Delete store” in the playground, or clear this site’s data in your browser settings.</li>
+      <li>Please don’t enter secrets, credentials or real personal data into the playground — use made-up identifiers like <code>user:anne</code>.</li>
+    </ul>
+
+    <h2 id="sharing">Share links</h2>
+    <p>“Share” builds a link that contains the whole store (model, tuples, assertions and the current query), compressed into the part of the URL after <code>#</code>. Browsers do not send that part to the web server, so the content is not uploaded or stored by this site. But <b>anyone who has the link can read everything in it</b>, and wherever you paste it (chat apps, tickets, email) may store it. Treat a share link like the data inside it.</p>
+
+    <h2 id="third">Third parties</h2>
+    <ul>
+      <li><b>Hosting — Vercel.</b> The site is served by Vercel, which, like any web host, processes technical request data (such as IP address, user agent and requested path) to deliver pages and protect the service. See <a href="https://vercel.com/legal/privacy-policy" rel="noopener">Vercel’s privacy policy</a>.</li>
+      <li><b>No other third-party requests.</b> Fonts and the graph libraries (d3, dagre) are served from this site itself — no font CDNs or script CDNs are contacted while you use it.</li>
+      <li><b>Links out</b> to openfga.dev, GitHub, CNCF and other sites are governed by those sites’ own terms and policies.</li>
+    </ul>
+
+    <h2 id="content">Content &amp; licences</h2>
+    <ul>
+      <li>The explanations, example stores and code of this site are original work, published on <a href="https://github.com/hiren0ded/fga-playground" rel="noopener">GitHub</a>. Short DSL snippets illustrate the publicly documented OpenFGA modeling language.</li>
+      <li>Fonts: Bricolage Grotesque, IBM Plex Sans and JetBrains Mono, under the SIL Open Font License 1.1. Libraries: d3 (ISC) and dagre (MIT).</li>
+      <li>OpenFGA itself is open-source software licensed under the Apache License 2.0; no OpenFGA source code is bundled in this site.</li>
+    </ul>
+
+    <h2 id="contact">Contact &amp; changes</h2>
+    <p>Questions, corrections or a trademark or content concern: open an issue on <a href="https://github.com/hiren0ded/fga-playground/issues" rel="noopener">GitHub</a>. If a rights holder asks for a change, it will be made promptly. This page may be updated as the site changes; the date at the top shows the latest revision.</p>
+  </article>
+</div>
+{{FOOTER}}
+</body>
+</html>

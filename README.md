@@ -1,4 +1,8 @@
-# OpenFGA Visual Playground
+# FGA Explorer
+
+An unofficial learning site for OpenFGA™-style authorization: a home page (`/`), a concepts guide (`/learning`), the interactive playground (`/playground`) and a disclaimer & privacy page (`/legal`). Not affiliated with or endorsed by the OpenFGA project, CNCF or The Linux Foundation; the resolver is an independent re-implementation for teaching. OpenFGA™ is a trademark of The Linux Foundation.
+
+## The playground
 
 Write an [OpenFGA](https://openfga.dev) authorization model, add relationship tuples, and watch
 **Check**, **ListObjects**, **ListUsers** and **Expand** resolve step by step on a live graph.
@@ -85,3 +89,12 @@ Open `local-test.html` directly in a browser, or serve `dist/site` with any stat
 The site is static. `vercel.json` tells Vercel to run `node build.js --site` and serve
 `dist/site`; every push to the default branch deploys. d3 and dagre are loaded from jsDelivr
 with a cdnjs fallback.
+
+## Site routes
+
+`node build.js --site` writes `dist/site/`: `index.html` (home), `learning.html`, `legal.html`,
+`playground.html`, and content-hashed `assets/` (app chunks, d3, dagre, self-hosted fonts). Vercel
+serves them at `/`, `/learning`, `/legal`, `/playground` (`cleanUrls`); `/home` and `/learn`
+redirect. Old share links (`/#s=…`) forward to `/playground#s=…`. `/playground?example=<id>&view=<schema|model|data|matrix>`
+opens an example store in a given view. No third-party requests: fonts and libraries are served
+from the site itself. Static page sources live in `src/site/`.

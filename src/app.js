@@ -1737,6 +1737,8 @@ user:* viewer document:readme
   Graph.on('blankClick', () => { NodeMenu.close(); CtxMenu.close(); if (!Graph.multiSelecting) Graph.clearFocus(); Graph.clearProof(); });
   Graph.on('proofBack', (where) => { if (where === 'matrix') setGraphMode('matrix'); });
   Graph.on('proofOrder', (o) => { S.ui.proofOrder = o; persist(); });
+  $('#btn-reset-view').addEventListener('click', () => { NodeMenu.close(); CtxMenu.close(); Graph.resetView(); });
+  Graph.on('reset', () => { S.proofBack = null; if (S.ui.derived) { /* keep derived edges */ } });
   Graph.on('proofCopy', (title) => { const [user, relation, object] = String(title || '').split(' '); if (user && relation && object) Proof.copyMarkdown({ user, relation, object, context: Query.contextObj() }); });
 
   // ── layout: collapsible panes, resizable widths, focus mode
@@ -1853,7 +1855,7 @@ user:* viewer document:readme
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); Query.run({}); return; }
     if (typing && e.key === 'Escape' && !NodeMenu.isOpen && !S.ui.focus) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (mq.matches) { S.ui.mobileView = 'graph'; applyMobile(); } $('#graph-find').focus(); return; }
-    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.clearProof({ force: true }); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
+    if (e.key === 'Escape') { if (CtxMenu.isOpen) { CtxMenu.close(); return; } if (NodeMenu.isOpen) { NodeMenu.close(); return; } if (!gmenu.hidden) { gmenu.hidden = true; return; } if (Graph.proofActive) { Graph.resetView(); return; } if (Graph.hasFocus) { Graph.clearFocus(); return; } if (S.ui.focus) { setFocus(false); return; } }
     if (typing) return;
     if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setFocus(!S.ui.focus); return; }
     if (e.key === '[') { S.ui.editorOpen = !S.ui.editorOpen; applyLayout(); persist(); return; }
@@ -1884,6 +1886,17 @@ user:* viewer document:readme
     if (S.ui.layout) Graph.setLayout(S.ui.layout);
     if (S.ui.cards) Graph.setCardsMode(S.ui.cards);
     if (S.ui.proofOrder) Graph.setProofOrder(S.ui.proofOrder);
+    // deep links from the static pages: /playground?example=drive&view=matrix
+    const qs = new URLSearchParams(location.search);
+    const exId = qs.get('example'), view = qs.get('view');
+    if (exId || view) history.replaceState(null, '', location.pathname + location.hash);
+    if (view && GRAPH_HINTS[view]) S.ui.graphMode = view;
+    const ex = exId && FGA_EXAMPLES.find((x) => x.id === exId);
+    if (ex) {
+      let st = S.stores.find((x) => x.exampleId === ex.id);
+      if (!st) { st = makeStore(ex.name, { dsl: ex.dsl, tuples: ex.tuples, assertions: ex.assertions, queries: ex.queries, exampleId: ex.id }); S.stores.push(st); }
+      S.activeStoreId = st.id;
+    }
     setGraphMode(S.ui.graphMode || 'schema');
     toggleInspector(S.ui.inspOpen !== false);
     switchStore(S.activeStoreId);
