@@ -1463,27 +1463,13 @@ user:* viewer document:readme
         st.usersOfType(ut).forEach((u) => { if (u.split(':')[0] !== ut) return; const any = objects.some((o) => cells.has(`${u}|${o}`) || wild.has(`${ut}|${o}`)); if (pure || any) rows.push({ id: u, type: ut }); });
         if (objects.some((o) => wild.has(`${ut}|${o}`))) rows.push({ id: `${ut}:*`, type: ut, wildcard: true });
       });
-      // ListUsers can't name who a "but not" removed when the exclusion is a public grant (user:*), so
-      // a cell with no access is checked once more: if a branch was taken away by an exclusion, it is ✕
-      const hasExclusion = (() => { let f = false; const t = m.typeMap.get(type); const seen = new Set(); const visit = (tn, rn) => { const k = `${tn}#${rn}`; if (seen.has(k) || f) return; seen.add(k); const tt = m.typeMap.get(tn), rr = tt && tt.relMap.get(rn); if (!rr) return; FGA.walkRewrite(rr.rewrite, (n) => { if (n.kind === 'difference') f = true; else if (n.kind === 'computed') visit(tn, n.relation); else if (n.kind === 'ttu') { const ts = tt.relMap.get(n.tupleset); (ts ? ts.directTypes : []).forEach((e) => visit(e.type, n.computed)); } else if (n.kind === 'this') n.types.forEach((e) => { if (e.relation) visit(e.type, e.relation); }); }); }; if (t) visit(type, relation); return f; })();
-      const exMemo = new Map();
-      let exBudget = 600;
-      const excludedByCheck = (u, obj) => {
-        const k = `${u}|${obj}`;
-        if (exMemo.has(k)) return exMemo.get(k);
-        let v = false;
-        if (hasExclusion && exBudget-- > 0) {
-          try { const res = FGA.check(m, st, { user: u, relation, object: obj, context: {} }); v = !res.allowed && !!res.trace && res.trace.frames.some((f) => f.excludedBy); } catch (e) { v = false; }
-        }
-        exMemo.set(k, v);
-        return v;
-      };
       const state = (row, obj) => {
         if (row.wildcard) return wild.get(`${row.type}|${obj}`) || '';
         const c = cells.get(`${row.id}|${obj}`);
-        if (c) return c;
+        // a cell taken away by a "but not" is simply not allowed: shown empty, its tooltip / why-not says why
+        if (c) return c === 'excluded' ? '' : c;
         if (wild.has(`${row.type}|${obj}`)) return 'public';
-        return excludedByCheck(row.id, obj) ? 'excluded' : '';
+        return '';
       };
       return { objects, rows, state };
     }
@@ -1602,7 +1588,7 @@ user:* viewer document:readme
       }
       const diff = stBefore !== undefined && stBefore !== null && td.dataset.b !== stNow && (td.classList.contains('added') || td.classList.contains('removed')) ? `<div class="sub">${td.classList.contains('added') ? 'gained' : 'lost'} compared with the selected model version (was: ${esc(stBefore || 'none')})</div>` : '';
       const has = ['direct', 'derived', 'public'].includes(stNow);
-      const KIND = { direct: ['●', 'direct', 'allowed — a tuple says so'], derived: ['◌', 'derived', 'allowed — no tuple says so; it comes through a team, parent or rewrite'], public: ['■', 'public', 'allowed — a wildcard grants it to everyone of this type'], excluded: ['✕', 'excluded', 'not allowed — the access is there, but a “but not” takes it away'], none: ['·', 'empty', 'not allowed — nothing grants it'] };
+      const KIND = { direct: ['●', 'direct', 'allowed — a tuple says so'], derived: ['◌', 'derived', 'allowed — no tuple says so; it comes through a team, parent or rewrite'], public: ['■', 'public', 'allowed — a wildcard grants it to everyone of this type'], excluded: ['✕', 'excluded', 'not allowed — the access is there, but a “but not” takes it away'], none: ['·', 'empty', 'not allowed — why, below'] };
       const kd = KIND[stNow || 'none'] || KIND.none;
       return `<div class="mx-tip-kind k-${stNow || 'none'}"><b>${kd[0]} ${kd[1]}</b><span>${kd[2]}</span></div><code>${esc(u)} ${esc(rel)} ${esc(o)}</code><div class="sub">${why}</div>${diff}<div class="sub">${has ? 'click to walk these steps here (matrix or tree) · double-click to walk them on the data graph' : 'click to see why not, here · double-click to see it on the data graph'}</div>`;
     }
